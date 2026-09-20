@@ -17,6 +17,8 @@ interface GeetestCaptchaProps {
   visible: boolean;
   onClose: () => void;
   onSuccess: (challenge: string, validate: string, seccode: string) => void;
+  /** 内联模式：不用 RN Modal（排查弹窗层是否吞触摸），改用页内绝对定位覆盖层 */
+  inline?: boolean;
 }
 
 interface GeetestConfig {
@@ -32,7 +34,7 @@ interface GeetestConfig {
  * 用户完成滑动后通过 onMessage 回传 validate / seccode，再调用 onSuccess。
  * 以底部弹出 Modal 形式展示，并适配深色模式。
  */
-export function GeetestCaptcha({ visible, onClose, onSuccess }: GeetestCaptchaProps) {
+export function GeetestCaptcha({ visible, onClose, onSuccess, inline = false }: GeetestCaptchaProps) {
   const scheme = useColorScheme();
   const c = colors[scheme === 'dark' ? 'dark' : 'light'];
   const isDark = scheme === 'dark';
@@ -99,6 +101,65 @@ export function GeetestCaptcha({ visible, onClose, onSuccess }: GeetestCaptchaPr
     ? buildCaptchaHtml(config, isDark)
     : '';
 
+  const sheet = (
+    <View style={styles.overlay} pointerEvents="box-none">
+      <View style={[styles.sheet, { backgroundColor: c.surface }]}>
+        <View style={[styles.header, { borderBottomColor: c.border }]}>
+          <Text style={[styles.title, { color: c.text }]}>滑块验证</Text>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Text style={[styles.closeBtn, { color: c.textMuted }]}>✕</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.body}>
+          {loading ? (
+            <View style={styles.centerBox}>
+              <ActivityIndicator size="large" color={c.primary} />
+              <Text style={[styles.hint, { color: c.textSecondary }]}>
+                正在加载验证码...
+              </Text>
+            </View>
+          ) : error ? (
+            <View style={styles.centerBox}>
+              <Text style={[styles.errorText, { color: c.error }]}>{error}</Text>
+              <Pressable
+                style={[styles.retryBtn, { borderColor: c.primary }]}
+                onPress={() => void fetchConfig()}
+              >
+                <Text style={[styles.retryText, { color: c.primary }]}>重试</Text>
+              </Pressable>
+            </View>
+          ) : config ? (
+            <WebView
+              source={{ html }}
+              onMessage={handleMessage}
+              style={styles.webview}
+              originWhitelist={['*']}
+              javaScriptEnabled
+              domStorageEnabled
+              scrollEnabled
+              nestedScrollEnabled
+              overScrollMode="never"
+              bounces={false}
+              mixedContentMode="compatibility"
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+            />
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+
+  if (inline) {
+    if (!visible) return null;
+    return (
+      <View style={[StyleSheet.absoluteFill, styles.inlineRoot]}>
+        {sheet}
+      </View>
+    );
+  }
+
   return (
     <Modal
       visible={visible}
@@ -106,54 +167,7 @@ export function GeetestCaptcha({ visible, onClose, onSuccess }: GeetestCaptchaPr
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable
-          style={[styles.sheet, { backgroundColor: c.surface }]}
-          onPress={() => {}}
-        >
-          <View style={[styles.header, { borderBottomColor: c.border }]}>
-            <Text style={[styles.title, { color: c.text }]}>滑块验证</Text>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <Text style={[styles.closeBtn, { color: c.textMuted }]}>✕</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.body}>
-            {loading ? (
-              <View style={styles.centerBox}>
-                <ActivityIndicator size="large" color={c.primary} />
-                <Text style={[styles.hint, { color: c.textSecondary }]}>
-                  正在加载验证码...
-                </Text>
-              </View>
-            ) : error ? (
-              <View style={styles.centerBox}>
-                <Text style={[styles.errorText, { color: c.error }]}>{error}</Text>
-                <Pressable
-                  style={[styles.retryBtn, { borderColor: c.primary }]}
-                  onPress={() => void fetchConfig()}
-                >
-                  <Text style={[styles.retryText, { color: c.primary }]}>重试</Text>
-                </Pressable>
-              </View>
-            ) : config ? (
-              <WebView
-                source={{ html }}
-                onMessage={handleMessage}
-                style={styles.webview}
-                originWhitelist={['*']}
-                javaScriptEnabled
-                domStorageEnabled
-                scrollEnabled
-                overScrollMode="never"
-                bounces={false}
-                showsVerticalScrollIndicator={false}
-                showsHorizontalScrollIndicator={false}
-              />
-            ) : null}
-          </View>
-        </Pressable>
-      </Pressable>
+      {sheet}
     </Modal>
   );
 }
@@ -241,6 +255,7 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
 <body>
   <div id="captcha"><div class="loading">加载验证码...</div></div>
   <div id="diag" style="position:fixed;left:0;top:0;right:0;padding:6px 8px;background:rgba(0,0,0,0.72);color:#fff;font-size:12px;line-height:1.45;font-family:ui-monospace,Menlo,monospace;pointer-events:none;z-index:2147483647;white-space:pre-wrap;">验证码诊断条</div>
+  <button id="selftest" style="position:fixed;left:8px;bottom:8px;z-index:2147483646;font-size:11px;padding:4px 10px;opacity:0.9;border-radius:6px;border:1px solid #888;">自检拖拽</button>
   <script>
     var CHALLENGE = ${challenge};
     var GT = ${gt};
@@ -258,18 +273,23 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
       post({ type: 'error', message: msg });
     }
 
-    // ===== fix5 诊断 + 触摸→鼠标兼容层 =====
+    // ===== fix6 诊断（全事件类型）+ 触摸→鼠标兼容层 =====
     var __diag = document.getElementById('diag');
-    var __d = { ts: 0, tm: 0, te: 0, bts: 0, bmd: 0, bpd: 0, moved: 0, hit: '-', found: false, mobi: /Mobi/i.test(navigator.userAgent) };
+    var __d = { ts: 0, tm: 0, te: 0, tc: 0, pd: 0, pm: 0, mm: 0, bts: 0, bmd: 0, bpd: 0, moved: 0, hit: '-', found: false, mobi: /Mobi/i.test(navigator.userAgent) };
     function __render() {
       if (!__diag) return;
-      __diag.textContent = 'ts:' + __d.ts + ' tm:' + __d.tm + ' te:' + __d.te +
-        ' | btn ts:' + __d.bts + ' md:' + __d.bmd + ' pd:' + __d.bpd +
-        ' | hit:' + __d.hit + ' | moved:' + __d.moved + 'px | Mobi:' + (__d.mobi ? 'Y' : 'N');
+      __diag.textContent = 'ts:' + __d.ts + ' tm:' + __d.tm + ' te:' + __d.te + ' tc:' + __d.tc +
+        ' | pt:' + __d.pd + '/' + __d.pm + ' mm:' + __d.mm +
+        ' | btn:' + __d.bts + '/' + __d.bmd + '/' + __d.bpd +
+        ' | hit:' + __d.hit + ' | mv:' + __d.moved + ' | sc:' + Math.round(document.documentElement.scrollHeight) + '/' + Math.round(window.innerHeight);
     }
     document.addEventListener('touchstart', function () { __d.ts++; __render(); }, true);
     document.addEventListener('touchmove', function () { __d.tm++; __render(); }, true);
     document.addEventListener('touchend', function () { __d.te++; __render(); }, true);
+    document.addEventListener('touchcancel', function () { __d.tc++; __render(); }, true);
+    document.addEventListener('pointerdown', function () { __d.pd++; __render(); }, true);
+    document.addEventListener('pointermove', function () { __d.pm++; __render(); }, true);
+    document.addEventListener('mousemove', function () { __d.mm++; __render(); }, true);
     function __findBtn() {
       var sels = ['.geetest_slider_button', '.geetest_slide_button', '[class*="slider_button"]', '[class*="slider"] button', '[class*="slider"]'];
       for (var i = 0; i < sels.length; i++) { try { var e = document.querySelector(sels[i]); if (e) return e; } catch (err) {} }
@@ -327,6 +347,39 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
     }, true);
     __render();
     setTimeout(__setupProbes, 3000);
+
+    // fix6：合成拖拽自检（判断控件逻辑本身能否响应）
+    function __selfTest() {
+      var btn = __findBtn();
+      if (!btn) { __diag.textContent += ' | selfTest:no-btn'; return; }
+      var r = btn.getBoundingClientRect();
+      var x0 = Math.round(r.x + r.width / 2), y0 = Math.round(r.y + r.height / 2);
+      var x1 = Math.min(x0 + 150, Math.round(window.innerWidth - 24));
+      var m0 = __d.moved;
+      var steps = 12, i = 1;
+      function fireTouch(type, x, y) {
+        try {
+          var t = new Touch({ identifier: 9, target: btn, clientX: x, clientY: y, pageX: x, pageY: y });
+          var eve = new TouchEvent(type, { bubbles: true, cancelable: true, view: window, touches: type === 'touchend' ? [] : [t], targetTouches: type === 'touchend' ? [] : [t], changedTouches: [t] });
+          btn.dispatchEvent(eve);
+          if (type === 'touchmove') document.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, cancelable: true, view: window, touches: [t], targetTouches: [t], changedTouches: [t] }));
+        } catch (err) {}
+      }
+      function tick() {
+        var x = Math.round(x0 + (x1 - x0) * i / steps);
+        fireTouch('touchmove', x, y0);
+        i += 1;
+        if (i <= steps) { setTimeout(tick, 16); }
+        else {
+          fireTouch('touchend', x1, y0);
+          setTimeout(function () { __diag.textContent = __diag.textContent + ' | 自检Δ=' + (__d.moved - m0) + 'px'; }, 400);
+        }
+      }
+      fireTouch('touchstart', x0, y0);
+      setTimeout(tick, 40);
+    }
+    var __stb = document.getElementById('selftest');
+    if (__stb) __stb.onclick = __selfTest;
 
     function showStartButton(captchaObj) {
       var root = document.getElementById('captcha');
@@ -433,4 +486,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   retryText: { ...typography.body, fontWeight: '600' },
+  inlineRoot: {
+    justifyContent: 'flex-end',
+    zIndex: 9999,
+    elevation: 9999,
+  },
 });

@@ -91,6 +91,7 @@ export default function LoginScreen() {
 
   // 极验滑块验证
   const [captchaVisible, setCaptchaVisible] = useState(false);
+  const [captchaInline, setCaptchaInline] = useState(false);
   const [geetestResult, setGeetestResult] = useState<{
     challenge: string;
     validate: string;
@@ -154,6 +155,7 @@ export default function LoginScreen() {
     }
     setGeetestResult({ challenge, validate, seccode });
     setCaptchaVisible(false);
+    setCaptchaInline(false);
   }
 
   /** 登录返回滑块相关错误时：重置结果，直接打开验证弹窗并提示重新完成 */
@@ -475,6 +477,13 @@ export default function LoginScreen() {
               disabled={!!geetestResult}
             />
           )}
+          {tab === 'account' && captchaEnabled && !geetestResult && (
+            <Pressable onPress={() => setCaptchaInline(true)} style={{ alignSelf: 'center' }}>
+              <Text style={[styles.link, { color: c.primary }]}>
+                拖不动滑块？点这里用「内联模式」再试
+              </Text>
+            </Pressable>
+          )}
           {tab === 'account' && (
             <Button label="登录" onPress={handleAccountLogin} loading={loading} />
           )}
@@ -508,6 +517,12 @@ export default function LoginScreen() {
       <GeetestCaptcha
         visible={captchaVisible}
         onClose={() => setCaptchaVisible(false)}
+        onSuccess={handleCaptchaSuccess}
+      />
+      <GeetestCaptcha
+        visible={captchaInline}
+        inline
+        onClose={() => setCaptchaInline(false)}
         onSuccess={handleCaptchaSuccess}
       />
     </SafeAreaView>
