@@ -144,7 +144,9 @@ export function GeetestCaptcha({ visible, onClose, onSuccess }: GeetestCaptchaPr
                 originWhitelist={['*']}
                 javaScriptEnabled
                 domStorageEnabled
-                scrollEnabled={false}
+                scrollEnabled
+                overScrollMode="never"
+                bounces={false}
                 showsVerticalScrollIndicator={false}
                 showsHorizontalScrollIndicator={false}
               />
@@ -178,13 +180,26 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <style>
-    * { box-sizing: border-box; }
-    body {
+    * {
+      box-sizing: border-box;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
       margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: none;
+    }
+    body {
       padding: ${spacing.md}px;
       background: ${bg};
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      overflow: hidden;
     }
     #captcha {
       min-height: 240px;
@@ -205,10 +220,27 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
       font-size: 14px;
     }
   </style>
+  <script>
+    // 强制 touch 监听为非 passive：部分 WebView 默认 passive 会让 preventDefault 失效，导致滑块拖不动
+    (function () {
+      var orig = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function (type, fn, opts) {
+        if (type === 'touchstart' || type === 'touchmove' || type === 'touchend') {
+          if (opts === undefined || opts === false || opts === true) {
+            opts = { capture: !!opts, passive: false };
+          } else if (typeof opts === 'object' && opts.passive === undefined) {
+            opts = Object.assign({}, opts, { passive: false });
+          }
+        }
+        return orig.call(this, type, fn, opts);
+      };
+    })();
+  </script>
   <script src="https://static.geetest.com/static/tools/gt.js" onerror="window.__gtScriptFailed=true"></script>
 </head>
 <body>
   <div id="captcha"><div class="loading">加载验证码...</div></div>
+  <div id="diag" style="position:fixed;right:6px;bottom:4px;font-size:10px;color:rgba(120,120,120,0.45);pointer-events:none;z-index:2147483647;">t:0</div>
   <script>
     var CHALLENGE = ${challenge};
     var GT = ${gt};
@@ -225,6 +257,13 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
       errored = true;
       post({ type: 'error', message: msg });
     }
+
+    // 触摸诊断计数器（若滑块仍拖不动，可观察拖动时右下角数字是否增长）
+    var __diag = document.getElementById('diag');
+    var __tCount = 0;
+    function __bump() { __tCount++; if (__diag) __diag.textContent = 't:' + __tCount; }
+    document.addEventListener('touchstart', __bump, { passive: true });
+    document.addEventListener('touchmove', __bump, { passive: true });
 
     function showStartButton(captchaObj) {
       var root = document.getElementById('captcha');
