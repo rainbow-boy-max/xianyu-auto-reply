@@ -240,7 +240,7 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
 </head>
 <body>
   <div id="captcha"><div class="loading">加载验证码...</div></div>
-  <div id="diag" style="position:fixed;right:6px;bottom:4px;font-size:10px;color:rgba(120,120,120,0.45);pointer-events:none;z-index:2147483647;">t:0</div>
+  <div id="diag" style="position:fixed;left:0;top:0;right:0;padding:6px 8px;background:rgba(0,0,0,0.72);color:#fff;font-size:12px;line-height:1.45;font-family:ui-monospace,Menlo,monospace;pointer-events:none;z-index:2147483647;white-space:pre-wrap;">验证码诊断条</div>
   <script>
     var CHALLENGE = ${challenge};
     var GT = ${gt};
@@ -258,12 +258,75 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
       post({ type: 'error', message: msg });
     }
 
-    // 触摸诊断计数器（若滑块仍拖不动，可观察拖动时右下角数字是否增长）
+    // ===== fix5 诊断 + 触摸→鼠标兼容层 =====
     var __diag = document.getElementById('diag');
-    var __tCount = 0;
-    function __bump() { __tCount++; if (__diag) __diag.textContent = 't:' + __tCount; }
-    document.addEventListener('touchstart', __bump, { passive: true });
-    document.addEventListener('touchmove', __bump, { passive: true });
+    var __d = { ts: 0, tm: 0, te: 0, bts: 0, bmd: 0, bpd: 0, moved: 0, hit: '-', found: false, mobi: /Mobi/i.test(navigator.userAgent) };
+    function __render() {
+      if (!__diag) return;
+      __diag.textContent = 'ts:' + __d.ts + ' tm:' + __d.tm + ' te:' + __d.te +
+        ' | btn ts:' + __d.bts + ' md:' + __d.bmd + ' pd:' + __d.bpd +
+        ' | hit:' + __d.hit + ' | moved:' + __d.moved + 'px | Mobi:' + (__d.mobi ? 'Y' : 'N');
+    }
+    document.addEventListener('touchstart', function () { __d.ts++; __render(); }, true);
+    document.addEventListener('touchmove', function () { __d.tm++; __render(); }, true);
+    document.addEventListener('touchend', function () { __d.te++; __render(); }, true);
+    function __findBtn() {
+      var sels = ['.geetest_slider_button', '.geetest_slide_button', '[class*="slider_button"]', '[class*="slider"] button', '[class*="slider"]'];
+      for (var i = 0; i < sels.length; i++) { try { var e = document.querySelector(sels[i]); if (e) return e; } catch (err) {} }
+      return null;
+    }
+    function __setupProbes() {
+      if (__d.found) return;
+      var btn = __findBtn();
+      if (!btn) return;
+      __d.found = true;
+      try {
+        var r = btn.getBoundingClientRect();
+        var el = document.elementFromPoint(Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2));
+        __d.hit = el ? ((el.className && typeof el.className === 'string' ? el.className : el.tagName) || el.tagName).toString().slice(0, 40) : 'null';
+      } catch (err) { __d.hit = 'err'; }
+      btn.addEventListener('touchstart', function () { __d.bts++; __render(); }, true);
+      btn.addEventListener('mousedown', function () { __d.bmd++; __render(); }, true);
+      btn.addEventListener('pointerdown', function () { __d.bpd++; __render(); }, true);
+      setInterval(function () {
+        try {
+          var m = window.getComputedStyle(btn).transform;
+          if (m && m.indexOf('matrix') === 0) {
+            var tx = parseFloat(m.split(',')[4] || '0');
+            var mv = Math.round(tx);
+            if (mv !== __d.moved) { __d.moved = mv; __render(); }
+          }
+        } catch (err) {}
+      }, 300);
+      __render();
+    }
+    var __shimActive = false;
+    function __inGt(el) { try { return !!(el && el.closest && el.closest('[class*="geetest"]')); } catch (err) { return false; } }
+    function __fireMouse(node, type, x, y) {
+      try { node.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: type === 'mouseup' ? 0 : 1 })); } catch (err) {}
+    }
+    document.addEventListener('touchstart', function (e) {
+      var t = e.touches && e.touches[0]; if (!t) return;
+      var el = document.elementFromPoint(t.clientX, t.clientY) || e.target;
+      if (!__inGt(el)) { __shimActive = false; return; }
+      __shimActive = true;
+      var btn = __findBtn();
+      __fireMouse(el, 'mousedown', t.clientX, t.clientY);
+      if (btn && btn !== el) __fireMouse(btn, 'mousedown', t.clientX, t.clientY);
+    }, true);
+    document.addEventListener('touchmove', function (e) {
+      if (!__shimActive) return;
+      var t = e.touches && e.touches[0]; if (!t) return;
+      __fireMouse(document, 'mousemove', t.clientX, t.clientY);
+    }, true);
+    document.addEventListener('touchend', function (e) {
+      if (!__shimActive) return;
+      __shimActive = false;
+      var t = (e.changedTouches && e.changedTouches[0]) || null;
+      __fireMouse(document, 'mouseup', t ? t.clientX : 0, t ? t.clientY : 0);
+    }, true);
+    __render();
+    setTimeout(__setupProbes, 3000);
 
     function showStartButton(captchaObj) {
       var root = document.getElementById('captcha');
@@ -273,6 +336,9 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
       btn.style.cssText = 'display:block;width:100%;max-width:300px;margin:0 auto;padding:14px 24px;font-size:16px;font-weight:600;color:#fff;background:#2f7cf6;border:none;border-radius:10px;';
       btn.onclick = function () {
         try { captchaObj.verify(); } catch (e) { postError('无法打开滑动画板，请重试'); }
+        setTimeout(__setupProbes, 400);
+        setTimeout(__setupProbes, 1200);
+        setTimeout(__setupProbes, 2500);
       };
       root.appendChild(btn);
     }
