@@ -23,6 +23,7 @@ interface GeetestConfig {
   challenge: string;
   gt: string;
   new_captcha: boolean;
+  offline: boolean;
 }
 
 /**
@@ -157,9 +158,11 @@ export function GeetestCaptcha({ visible, onClose, onSuccess }: GeetestCaptchaPr
 
 /**
  * 生成极验滑块 HTML。
- * - 使用 product: 'embed' 内嵌渲染，适配 WebView 环境
- * - SDK 加载后通过 tryInit 轮询等待 initGeetest 就绪
- * - 成功/出错/关闭均通过 postMessage 回传
+ * - 强制 https（关键：WebView 页面 location.protocol 为 about:，
+ *   不强制会让极验 SDK 拼出 about:// 地址、所有资源加载失败、永远卡在“加载验证码”）
+ * - product 与 Web 端保持一致（bind 模式 + 自有按钮触发 verify()）
+ * - SDK 加载失败 / 初始化超时均有明确错误回传，不再无限卡加载
+ * - 成功/出错通过 postMessage 回传
  */
 function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
   const bg = isDark ? '#1C1C1E' : '#FFFFFF';
@@ -168,6 +171,7 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
   const challenge = JSON.stringify(cfg.challenge);
   const gt = JSON.stringify(cfg.gt);
   const newCaptcha = JSON.stringify(cfg.new_captcha);
+  const offline = JSON.stringify(cfg.offline === true);
 
   return `<!DOCTYPE html>
 <html>
@@ -201,7 +205,7 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
       font-size: 14px;
     }
   </style>
-  <script src="https://static.geetest.com/static/tools/gt.js"></script>
+  <script src="https://static.geetest.com/static/tools/gt.js" onerror="window.__gtScriptFailed=true"></script>
 </head>
 <body>
   <div id="captcha"><div class="loading">加载验证码...</div></div>
@@ -209,45 +213,74 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
     var CHALLENGE = ${challenge};
     var GT = ${gt};
     var NEW_CAPTCHA = ${newCaptcha};
+    var OFFLINE = ${offline};
+    var errored = false;
+
+    function post(msg) {
+      try { window.ReactNativeWebView.postMessage(JSON.stringify(msg)); } catch (e) {}
+    }
 
     function postError(msg) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: msg }));
+      if (errored) return;
+      errored = true;
+      post({ type: 'error', message: msg });
+    }
+
+    function showStartButton(captchaObj) {
+      var root = document.getElementById('captcha');
+      root.innerHTML = '';
+      var btn = document.createElement('button');
+      btn.textContent = '点击开始滑动验证';
+      btn.style.cssText = 'display:block;width:100%;max-width:300px;margin:0 auto;padding:14px 24px;font-size:16px;font-weight:600;color:#fff;background:#2f7cf6;border:none;border-radius:10px;';
+      btn.onclick = function () {
+        try { captchaObj.verify(); } catch (e) { postError('无法打开滑动画板，请重试'); }
+      };
+      root.appendChild(btn);
+    }
+
+    function initWidget() {
+      var inited = false;
+      initGeetest({
+        gt: GT,
+        challenge: CHALLENGE,
+        new_captcha: NEW_CAPTCHA,
+        offline: OFFLINE,
+        product: 'bind',
+        width: '100%',
+        lang: 'zh-cn',
+        https: true,
+        protocol: 'https://'
+      }, function(captchaObj) {
+        inited = true;
+        showStartButton(captchaObj);
+        captchaObj.onSuccess(function() {
+          var result = captchaObj.getValidate();
+          if (!result) return;
+          post({
+            type: 'success',
+            challenge: CHALLENGE,
+            validate: result.geetest_validate,
+            seccode: result.geetest_seccode
+          });
+        });
+        captchaObj.onError(function() { postError('验证码加载失败，请重试'); });
+        captchaObj.onClose(function() {});
+      });
+      setTimeout(function() {
+        if (!inited) postError('验证码初始化超时，请重试');
+      }, 15000);
     }
 
     function tryInit(retries) {
-      if (typeof initGeetest === 'function') {
-        initGeetest({
-          gt: GT,
-          challenge: CHALLENGE,
-          new_captcha: NEW_CAPTCHA,
-          offline: false,
-          product: 'embed',
-        }, function(captchaObj) {
-          document.getElementById('captcha').innerHTML = '';
-          captchaObj.appendTo('#captcha');
-          captchaObj.onSuccess(function() {
-            var result = captchaObj.getValidate();
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'success',
-              challenge: CHALLENGE,
-              validate: result.geetest_validate,
-              seccode: result.geetest_seccode,
-            }));
-          });
-          captchaObj.onError(function() {
-            postError('验证码加载失败，请重试');
-          });
-          captchaObj.onClose(function() {
-            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'close' }));
-          });
-        });
-      } else if (retries > 0) {
-        setTimeout(function() { tryInit(retries - 1); }, 100);
+      if (window.__gtScriptFailed) { postError('极验 SDK 加载失败，请检查网络后重试'); return; }
+      if (typeof initGeetest === 'function') { initWidget(); return; }
+      if (retries > 0) {
+        setTimeout(function() { tryInit(retries - 1); }, 200);
       } else {
         postError('极验 SDK 加载失败，请检查网络后重试');
       }
     }
-    tryInit(30);
+    tryInit(100);
   </script>
 </body>
 </html>`;
