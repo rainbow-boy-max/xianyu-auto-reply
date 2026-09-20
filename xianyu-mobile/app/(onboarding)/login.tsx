@@ -24,6 +24,7 @@ import {
   loginWithEmail,
   loginWithVerificationCode,
   sendEmailCode,
+  validateGeetest,
   getPublicSettings,
   extractUser,
   type LoginResponse,
@@ -138,21 +139,29 @@ export default function LoginScreen() {
     );
   }
 
-  /** 滑块验证成功：存储结果并关闭弹窗 */
-  function handleCaptchaSuccess(
+  /** 滑块验证成功：先完成服务端二次校验，再存储结果并关闭弹窗 */
+  async function handleCaptchaSuccess(
     challenge: string,
     validate: string,
     seccode: string,
   ) {
+    try {
+      await validateGeetest(challenge, validate, seccode);
+    } catch (e) {
+      setGeetestResult(null);
+      Alert.alert('验证失败', `${(e as Error).message || '未知错误'}，请重新完成滑块验证`);
+      return;
+    }
     setGeetestResult({ challenge, validate, seccode });
     setCaptchaVisible(false);
   }
 
-  /** 登录返回滑块相关错误时，提示并重置验证结果以便重新完成 */
+  /** 登录返回滑块相关错误时：重置结果，直接打开验证弹窗并提示重新完成 */
   function handleCaptchaFailure(message: string) {
     setGeetestResult(null);
-    Alert.alert('验证失效', `${message}，请重新完成滑块验证`, [
-      { text: '知道了' },
+    setCaptchaVisible(true);
+    Alert.alert('需要完成滑块验证', `${message}。已为你打开验证弹窗，完成滑动后重新点击登录即可。`, [
+      { text: '去完成' },
     ]);
   }
 
