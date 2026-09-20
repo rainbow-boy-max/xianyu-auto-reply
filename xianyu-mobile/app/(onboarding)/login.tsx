@@ -37,6 +37,13 @@ function isValidEmail(email: string) {
   return EMAIL_RE.test(email);
 }
 
+/** 宽松解析布尔型系统设置：兼容 true / 'true' / '1' / 1 与大小写、空白差异 */
+function isTruthySetting(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  const text = String(value ?? '').trim().toLowerCase();
+  return text === 'true' || text === '1';
+}
+
 /** 60 秒倒计时 hook */
 function useCountdown() {
   const [countdown, setCountdown] = useState(0);
@@ -95,8 +102,8 @@ export default function LoginScreen() {
       try {
         const settings = await getPublicSettings();
         if (cancelled) return;
-        setCaptchaEnabled(settings.login_captcha_enabled === true || settings.login_captcha_enabled === 'true');
-        setRegistrationEnabled(settings.registration_enabled === true || settings.registration_enabled === 'true');
+        setCaptchaEnabled(isTruthySetting(settings.login_captcha_enabled));
+        setRegistrationEnabled(isTruthySetting(settings.registration_enabled));
       } catch {
         // 读取失败时保持默认（无滑块、不显示注册入口），不阻塞登录
       }
@@ -156,7 +163,8 @@ export default function LoginScreen() {
       return;
     }
     if (captchaEnabled && !geetestResult) {
-      Alert.alert('提示', '请先完成滑块验证');
+      // 修复：未完成滑块时直接弹出验证弹窗（原实现只 Alert 提示不弹窗，导致永远无法完成验证）
+      setCaptchaVisible(true);
       return;
     }
     setLoading(true);
@@ -195,7 +203,8 @@ export default function LoginScreen() {
       return;
     }
     if (captchaEnabled && !geetestResult) {
-      Alert.alert('提示', '请先完成滑块验证');
+      // 修复：未完成滑块时直接弹出验证弹窗（原实现只 Alert 提示不弹窗，导致永远无法完成验证）
+      setCaptchaVisible(true);
       return;
     }
     setLoading(true);
