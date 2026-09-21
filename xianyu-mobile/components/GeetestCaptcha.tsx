@@ -254,8 +254,6 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
 </head>
 <body>
   <div id="captcha"><div class="loading">加载验证码...</div></div>
-  <div id="diag" style="position:fixed;left:0;top:0;right:0;padding:6px 8px;background:rgba(0,0,0,0.72);color:#fff;font-size:12px;line-height:1.45;font-family:ui-monospace,Menlo,monospace;pointer-events:none;z-index:2147483647;white-space:pre-wrap;">验证码诊断条</div>
-  <button id="selftest" style="position:fixed;left:8px;bottom:8px;z-index:2147483646;font-size:11px;padding:4px 10px;opacity:0.9;border-radius:6px;border:1px solid #888;">自检拖拽</button>
   <script>
     var CHALLENGE = ${challenge};
     var GT = ${gt};
@@ -273,113 +271,10 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
       post({ type: 'error', message: msg });
     }
 
-    // ===== fix6 诊断（全事件类型）+ 触摸→鼠标兼容层 =====
-    var __diag = document.getElementById('diag');
-    var __d = { ts: 0, tm: 0, te: 0, tc: 0, pd: 0, pm: 0, mm: 0, bts: 0, bmd: 0, bpd: 0, moved: 0, hit: '-', found: false, mobi: /Mobi/i.test(navigator.userAgent) };
-    function __render() {
-      if (!__diag) return;
-      __diag.textContent = 'ts:' + __d.ts + ' tm:' + __d.tm + ' te:' + __d.te + ' tc:' + __d.tc +
-        ' | pt:' + __d.pd + '/' + __d.pm + ' mm:' + __d.mm +
-        ' | btn:' + __d.bts + '/' + __d.bmd + '/' + __d.bpd +
-        ' | hit:' + __d.hit + ' | mv:' + __d.moved + ' | sc:' + Math.round(document.documentElement.scrollHeight) + '/' + Math.round(window.innerHeight);
-    }
-    document.addEventListener('touchstart', function () { __d.ts++; __render(); }, true);
-    document.addEventListener('touchmove', function () { __d.tm++; __render(); }, true);
-    document.addEventListener('touchend', function () { __d.te++; __render(); }, true);
-    document.addEventListener('touchcancel', function () { __d.tc++; __render(); }, true);
-    document.addEventListener('pointerdown', function () { __d.pd++; __render(); }, true);
-    document.addEventListener('pointermove', function () { __d.pm++; __render(); }, true);
-    document.addEventListener('mousemove', function () { __d.mm++; __render(); }, true);
-    function __findBtn() {
-      var sels = ['.geetest_slider_button', '.geetest_slide_button', '[class*="slider_button"]', '[class*="slider"] button', '[class*="slider"]'];
-      for (var i = 0; i < sels.length; i++) { try { var e = document.querySelector(sels[i]); if (e) return e; } catch (err) {} }
-      return null;
-    }
-    function __setupProbes() {
-      if (__d.found) return;
-      var btn = __findBtn();
-      if (!btn) return;
-      __d.found = true;
-      try {
-        var r = btn.getBoundingClientRect();
-        var el = document.elementFromPoint(Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2));
-        __d.hit = el ? ((el.className && typeof el.className === 'string' ? el.className : el.tagName) || el.tagName).toString().slice(0, 40) : 'null';
-      } catch (err) { __d.hit = 'err'; }
-      btn.addEventListener('touchstart', function () { __d.bts++; __render(); }, true);
-      btn.addEventListener('mousedown', function () { __d.bmd++; __render(); }, true);
-      btn.addEventListener('pointerdown', function () { __d.bpd++; __render(); }, true);
-      setInterval(function () {
-        try {
-          var m = window.getComputedStyle(btn).transform;
-          if (m && m.indexOf('matrix') === 0) {
-            var tx = parseFloat(m.split(',')[4] || '0');
-            var mv = Math.round(tx);
-            if (mv !== __d.moved) { __d.moved = mv; __render(); }
-          }
-        } catch (err) {}
-      }, 300);
-      __render();
-    }
-    var __shimActive = false;
-    function __inGt(el) { try { return !!(el && el.closest && el.closest('[class*="geetest"]')); } catch (err) { return false; } }
-    function __fireMouse(node, type, x, y) {
-      try { node.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: type === 'mouseup' ? 0 : 1 })); } catch (err) {}
-    }
-    document.addEventListener('touchstart', function (e) {
-      var t = e.touches && e.touches[0]; if (!t) return;
-      var el = document.elementFromPoint(t.clientX, t.clientY) || e.target;
-      if (!__inGt(el)) { __shimActive = false; return; }
-      __shimActive = true;
-      var btn = __findBtn();
-      __fireMouse(el, 'mousedown', t.clientX, t.clientY);
-      if (btn && btn !== el) __fireMouse(btn, 'mousedown', t.clientX, t.clientY);
-    }, true);
-    document.addEventListener('touchmove', function (e) {
-      if (!__shimActive) return;
-      var t = e.touches && e.touches[0]; if (!t) return;
-      __fireMouse(document, 'mousemove', t.clientX, t.clientY);
-    }, true);
-    document.addEventListener('touchend', function (e) {
-      if (!__shimActive) return;
-      __shimActive = false;
-      var t = (e.changedTouches && e.changedTouches[0]) || null;
-      __fireMouse(document, 'mouseup', t ? t.clientX : 0, t ? t.clientY : 0);
-    }, true);
-    __render();
-    setTimeout(__setupProbes, 3000);
 
-    // fix6：合成拖拽自检（判断控件逻辑本身能否响应）
-    function __selfTest() {
-      var btn = __findBtn();
-      if (!btn) { __diag.textContent += ' | selfTest:no-btn'; return; }
-      var r = btn.getBoundingClientRect();
-      var x0 = Math.round(r.x + r.width / 2), y0 = Math.round(r.y + r.height / 2);
-      var x1 = Math.min(x0 + 150, Math.round(window.innerWidth - 24));
-      var m0 = __d.moved;
-      var steps = 12, i = 1;
-      function fireTouch(type, x, y) {
-        try {
-          var t = new Touch({ identifier: 9, target: btn, clientX: x, clientY: y, pageX: x, pageY: y });
-          var eve = new TouchEvent(type, { bubbles: true, cancelable: true, view: window, touches: type === 'touchend' ? [] : [t], targetTouches: type === 'touchend' ? [] : [t], changedTouches: [t] });
-          btn.dispatchEvent(eve);
-          if (type === 'touchmove') document.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, cancelable: true, view: window, touches: [t], targetTouches: [t], changedTouches: [t] }));
-        } catch (err) {}
-      }
-      function tick() {
-        var x = Math.round(x0 + (x1 - x0) * i / steps);
-        fireTouch('touchmove', x, y0);
-        i += 1;
-        if (i <= steps) { setTimeout(tick, 16); }
-        else {
-          fireTouch('touchend', x1, y0);
-          setTimeout(function () { __diag.textContent = __diag.textContent + ' | 自检Δ=' + (__d.moved - m0) + 'px'; }, 400);
-        }
-      }
-      fireTouch('touchstart', x0, y0);
-      setTimeout(tick, 40);
-    }
-    var __stb = document.getElementById('selftest');
-    if (__stb) __stb.onclick = __selfTest;
+
+
+
 
     function showStartButton(captchaObj) {
       var root = document.getElementById('captcha');
@@ -389,9 +284,6 @@ function buildCaptchaHtml(cfg: GeetestConfig, isDark: boolean): string {
       btn.style.cssText = 'display:block;width:100%;max-width:300px;margin:0 auto;padding:14px 24px;font-size:16px;font-weight:600;color:#fff;background:#2f7cf6;border:none;border-radius:10px;';
       btn.onclick = function () {
         try { captchaObj.verify(); } catch (e) { postError('无法打开滑动画板，请重试'); }
-        setTimeout(__setupProbes, 400);
-        setTimeout(__setupProbes, 1200);
-        setTimeout(__setupProbes, 2500);
       };
       root.appendChild(btn);
     }

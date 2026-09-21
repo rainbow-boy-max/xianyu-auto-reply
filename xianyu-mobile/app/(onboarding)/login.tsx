@@ -480,7 +480,7 @@ export default function LoginScreen() {
           {tab === 'account' && captchaEnabled && !geetestResult && (
             <Pressable onPress={() => setCaptchaInline(true)} style={{ alignSelf: 'center' }}>
               <Text style={[styles.link, { color: c.primary }]}>
-                拖不动滑块？点这里用「内联模式」再试
+                拖不动滑块？点这里换一种方式重试
               </Text>
             </Pressable>
           )}
