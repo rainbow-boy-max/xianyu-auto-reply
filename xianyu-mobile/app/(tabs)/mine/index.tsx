@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, TextInput } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { Card, Button } from '@/components/ui';
 import { colors, spacing, typography, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/auth';
+import { getEntitlements, getPendingPopup, dismissPopup } from '@/api/wrappers/subscription';
 import { useConfigStore } from '@/stores/config';
 import {
   User,
@@ -45,6 +46,8 @@ import {
   SlidersHorizontal,
   Clock,
   Database,
+  Crown,
+  Coins,
 } from 'lucide-react-native';
 
 type MenuItem = { label: string; icon: typeof User; onPress: () => void; adminOnly?: boolean };
@@ -57,6 +60,30 @@ export default function MineScreen() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const serverUrl = useConfigStore((s) => s.serverUrl);
+  // [会员订阅补丁] 当前套餐 + 到期提醒弹窗
+  const [planName, setPlanName] = useState('');
+  const [daysLeft, setDaysLeft] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [ent, popup] = await Promise.all([getEntitlements(), getPendingPopup()]);
+        if (!alive) return;
+        if (ent?.plan) setPlanName(ent.plan.name);
+        setDaysLeft(ent?.subscription?.days_left ?? null);
+        if (popup) {
+          Alert.alert(popup.title, popup.content, [
+            { text: '稍后', style: 'cancel', onPress: () => dismissPopup(popup.id) },
+            { text: '去续费', onPress: () => { dismissPopup(popup.id); router.push('/(tabs)/mine/subscription'); } },
+          ]);
+        }
+      } catch {
+        /* 忽略：未登录或网络异常时静默 */
+      }
+    })();
+    return () => { alive = false; };
+  }, [router]);
 
   // 分组菜单（adminOnly: true 项仅管理员可见，与 Web 端导航一致；组内保持功能顺序）
   const menuSections: MenuSection[] = [
@@ -113,6 +140,13 @@ export default function MineScreen() {
       ],
     },
     {
+      title: '会员订阅',
+      items: [
+        { label: '会员中心', icon: Crown, onPress: () => router.push('/(tabs)/mine/subscription') },
+        { label: 'AI 钱包', icon: Coins, onPress: () => router.push('/(tabs)/mine/ai-wallet') },
+      ],
+    },
+    {
       title: '设置',
       items: [
         { label: '系统设置', icon: Settings, onPress: () => router.push('/(tabs)/mine/settings'), adminOnly: true },
@@ -137,6 +171,7 @@ export default function MineScreen() {
     {
       title: '其他',
       items: [
+        { label: '用户协议与隐私政策', icon: FileText, onPress: () => router.push('/legal') },
         { label: '免责声明', icon: FileText, onPress: () => router.push('/(tabs)/mine/disclaimer') },
         { label: '使用教程', icon: HelpCircle, onPress: () => router.push('/(tabs)/mine/tutorial') },
         { label: '关于', icon: Info, onPress: () => router.push('/(tabs)/mine/about') },
@@ -184,6 +219,13 @@ export default function MineScreen() {
                   {user?.is_admin ? '管理员' : '用户'}
                 </Text>
               </View>
+              {planName ? (
+                <View style={[styles.tag, { backgroundColor: c.border }]}>
+                  <Text style={[styles.tagText, { color: c.textSecondary }]}>
+                    {planName}{daysLeft != null ? ` · 剩${daysLeft}天` : ''}
+                  </Text>
+                </View>
+              ) : null}
               {serverUrl && (
                 <Text style={[styles.serverUrl, { color: c.textMuted }]} numberOfLines={1}>
                   {serverUrl}

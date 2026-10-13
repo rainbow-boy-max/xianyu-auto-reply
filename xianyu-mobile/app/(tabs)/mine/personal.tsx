@@ -15,8 +15,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Card, Button, Input, Loading, FormModal, Badge } from '@/components/ui';
+import { AccountSecuritySection } from '@/components/AccountSecuritySection';
 import { colors, spacing, typography, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/auth';
+import {
+  getPasswordPolicy,
+  checkPassword,
+  DEFAULT_PASSWORD_POLICY,
+  type PasswordPolicy,
+} from '@/api/wrappers/auth';
 import {
   changePassword,
   recharge,
@@ -238,14 +245,24 @@ export default function PersonalSettingsScreen() {
     loadRenewPrice();
   }, [loadFlows, loadProfile, loadRenewPrice]);
 
+  // [APP 同步补丁 2026-10-13] 密码强度策略（用于修改密码实时提示）
+  const [pwdPolicy, setPwdPolicy] = useState<PasswordPolicy>(DEFAULT_PASSWORD_POLICY);
+
+  useEffect(() => {
+    getPasswordPolicy()
+      .then((p) => setPwdPolicy(p))
+      .catch(() => {});
+  }, []);
+
   // ---- 修改密码 ----
   async function handleChangePassword() {
     if (!currentPwd || !newPwd || !confirmPwd) {
       Alert.alert('提示', '请填写完整的密码信息');
       return;
     }
-    if (newPwd.length < 6) {
-      Alert.alert('提示', '新密码至少 6 位');
+    const strength = checkPassword(newPwd, pwdPolicy);
+    if (!strength.ok) {
+      Alert.alert('密码强度不符合要求', strength.message);
       return;
     }
     if (newPwd !== confirmPwd) {
@@ -573,7 +590,7 @@ export default function PersonalSettingsScreen() {
             <Input
               value={newPwd}
               onChangeText={setNewPwd}
-              placeholder="至少 6 位"
+              placeholder={`至少 ${pwdPolicy.min_length || 8} 位，含大小写字母、数字与特殊字符`}
               secureTextEntry={!showPwd}
               autoCapitalize="none"
               autoCorrect={false}
@@ -615,6 +632,14 @@ export default function PersonalSettingsScreen() {
             style={styles.pwdBtn}
           />
         </Card>
+
+        {/* [APP 同步补丁 2026-10-13] 账号安全：双因素 / 数据导出 / 账号注销 */}
+        <AccountSecuritySection
+          onDeleted={async () => {
+            await useAuthStore.getState().logout();
+            router.replace('/(onboarding)/login');
+          }}
+        />
       </ScrollView>
 
       {/* 充值 Modal */}

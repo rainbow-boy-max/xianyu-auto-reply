@@ -77,6 +77,8 @@ export default function RootLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="(onboarding)" />
             <Stack.Screen name="(tabs)" />
+            {/* [APP 同步补丁 2026-10-13] 法律文书（用户协议/隐私政策），自带页头 */}
+            <Stack.Screen name="legal" />
           </Stack>
         </SafeAreaProvider>
       </AlertProvider>

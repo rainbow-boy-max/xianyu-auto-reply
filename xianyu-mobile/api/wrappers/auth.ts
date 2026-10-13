@@ -10,6 +10,9 @@ export interface LoginResponse {
   username?: string | null;
   is_admin?: boolean | null;
   account_limit?: number | null;
+  // [APP 同步补丁 2026-10-13] 已开启双因素认证时返回
+  need_2fa?: boolean | null;
+  twofa_token?: string | null;
 }
 
 interface VerifyResponse {
@@ -233,4 +236,154 @@ export async function getPublicSettings(): Promise<Record<string, unknown>> {
 
   if (error) throw await extractError(error);
   return (data ?? {}) as Record<string, unknown>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [APP 同步补丁 2026-10-13] 密码策略 / 手机号短信 / 完整注册 / 双因素登录
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 密码强度策略（等保 2.0，后台可配） */
+export interface PasswordPolicy {
+  min_length: number;
+  require_upper: boolean;
+  require_lower: boolean;
+  require_digit: boolean;
+  require_special: boolean;
+}
+
+export const DEFAULT_PASSWORD_POLICY: PasswordPolicy = {
+  min_length: 8,
+  require_upper: true,
+  require_lower: true,
+  require_digit: true,
+  require_special: true,
+};
+
+/** 与后端一致的待殊字符集 */
+export const PASSWORD_SPECIAL_CHARS = "!@#$%^&*()-_=+[]{};:'\",.<>/?\\|`~";
+
+export interface PasswordCheck {
+  ok: boolean;
+  checks: Record<string, boolean>;
+  required: string[];
+  missing: string[];
+  message: string;
+}
+
+/** 本地按策略校验密码（与后端逻辑一致，用于实时提示） */
+export function checkPassword(password: string, policy: PasswordPolicy): PasswordCheck {
+  const pwd = password || '';
+  const chars = Array.from(pwd);
+  const checks: Record<string, boolean> = {
+    length: pwd.length >= (policy.min_length || 8),
+    upper: /[A-Z]/.test(pwd),
+    lower: /[a-z]/.test(pwd),
+    digit: /[0-9]/.test(pwd),
+    special: chars.some((ch) => PASSWORD_SPECIAL_CHARS.includes(ch)),
+  };
+  const required = ['length'];
+  if (policy.require_upper) required.push('upper');
+  if (policy.require_lower) required.push('lower');
+  if (policy.require_digit) required.push('digit');
+  if (policy.require_special) required.push('special');
+  const missing = required.filter((k) => !checks[k]);
+  const label: Record<string, string> = {
+    length: `长度至少 ${policy.min_length || 8} 位`,
+    upper: '包含大写字母',
+    lower: '包含小写字母',
+    digit: '包含数字',
+    special: '包含特殊字符',
+  };
+  return {
+    ok: missing.length === 0,
+    checks,
+    required,
+    missing,
+    message: missing.length ? `密码还需：${missing.map((k) => label[k]).join('、')}` : '密码强度符合要求',
+  };
+}
+
+/** 获取密码强度策略（公开接口） */
+export async function getPasswordPolicy(): Promise<PasswordPolicy> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.GET as any)(
+    '/api/v1/auth/password-policy',
+  )) as { data?: { data?: { policy?: PasswordPolicy } }; error?: unknown };
+  if (error) throw await extractError(error);
+  const policy = (data as any)?.data?.policy;
+  return policy ?? DEFAULT_PASSWORD_POLICY;
+}
+
+/** 发送短信验证码（需先过极验，scene: register/login/reset_password） */
+export async function sendSmsCode(
+  target: string,
+  scene: 'register' | 'login' | 'reset_password' | 'bind_phone' | 'change_phone',
+  geetestChallenge: string,
+): Promise<{ success: boolean; message?: string }> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.POST as any)('/api/v1/auth/sms-code', {
+    body: { target, scene, geetest_challenge: geetestChallenge },
+  })) as { data?: { success: boolean; message?: string }; error?: unknown };
+  if (error) throw await extractError(error);
+  return (data ?? { success: false }) as { success: boolean; message?: string };
+}
+
+/** 发送邮箱验证码（需先过极验，scene: register/login/reset_password） */
+export async function sendEmailCodeWithGeetest(
+  target: string,
+  scene: 'register' | 'login' | 'reset_password',
+  geetestChallenge: string,
+): Promise<{ success: boolean; message?: string }> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.POST as any)('/api/v1/auth/email-code', {
+    body: { target, scene, geetest_challenge: geetestChallenge },
+  })) as { data?: { success: boolean; message?: string }; error?: unknown };
+  if (error) throw await extractError(error);
+  return (data ?? { success: false }) as { success: boolean; message?: string };
+}
+
+/** 完整注册：用户名 + 邮箱验证码 + 手机号短信验证码 + 密码 */
+export async function registerFull(payload: {
+  username: string;
+  email: string;
+  email_code: string;
+  phone: string;
+  sms_code: string;
+  password: string;
+}): Promise<{ success: boolean; message?: string }> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.POST as any)('/api/v1/auth/register-full', {
+    body: payload,
+  })) as { data?: { success: boolean; message?: string }; error?: unknown };
+  if (error) throw await extractError(error);
+  return (data ?? { success: false }) as { success: boolean; message?: string };
+}
+
+/** 手机号登录（验证码或密码） */
+export async function loginByPhone(payload: {
+  phone: string;
+  code?: string;
+  password?: string;
+  totp_code?: string;
+  twofa_token?: string;
+}): Promise<LoginResponse> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.POST as any)('/api/v1/auth/login-phone', {
+    body: payload,
+  })) as { data?: LoginResponse; error?: unknown };
+  if (error) throw await extractError(error);
+  return data as LoginResponse;
+}
+
+/** 双因素登录第二步：用临时令牌 + 动态码/恢复码换取正式登录态 */
+export async function twoFactorLogin(
+  twofaToken: string,
+  code: string,
+): Promise<LoginResponse> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.POST as any)('/api/v1/user/2fa/login', {
+    body: { twofa_token: twofaToken, code },
+  })) as { data?: LoginResponse; error?: unknown };
+  if (error) throw await extractError(error);
+  return data as LoginResponse;
 }

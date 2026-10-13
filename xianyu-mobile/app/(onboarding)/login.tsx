@@ -23,14 +23,17 @@ import {
   login,
   loginWithEmail,
   loginWithVerificationCode,
+  loginByPhone,
+  twoFactorLogin,
   sendEmailCode,
+  sendSmsCode,
   validateGeetest,
   getPublicSettings,
   extractUser,
   type LoginResponse,
 } from '@/api/wrappers/auth';
 
-type Tab = 'account' | 'email' | 'code';
+type Tab = 'account' | 'email' | 'code' | 'phone';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -87,6 +90,18 @@ export default function LoginScreen() {
   const codeCountdown = useCountdown();
   const [sendingCode, setSendingCode] = useState(false);
 
+  // [APP 同步补丁 2026-10-13] 手机号登录
+  const [phone, setPhone] = useState('');
+  const [phonePassword, setPhonePassword] = useState('');
+  const [phoneCode, setPhoneCode] = useState('');
+  const phoneCountdown = useCountdown();
+  const [sendingPhoneCode, setSendingPhoneCode] = useState(false);
+
+  // [APP 同步补丁 2026-10-13] 双因素认证第二步
+  const [need2fa, setNeed2fa] = useState(false);
+  const [twofaToken, setTwofaToken] = useState('');
+  const [twofaCode, setTwofaCode] = useState('');
+
   const [loading, setLoading] = useState(false);
 
   // 极验滑块验证
@@ -116,6 +131,13 @@ export default function LoginScreen() {
   }, []);
 
   async function applyLoginResponse(resp: LoginResponse) {
+    // [APP 同步补丁 2026-10-13] 已开启双因素认证：切到动态码步骤
+    if (resp.need_2fa) {
+      setNeed2fa(true);
+      setTwofaToken(resp.twofa_token ?? '');
+      setTwofaCode('');
+      return;
+    }
     if (resp.success && resp.token) {
       const user = extractUser(resp);
       if (user) {
@@ -126,6 +148,37 @@ export default function LoginScreen() {
       }
     } else {
       Alert.alert('登录失败', resp.message ?? '未知错误');
+    }
+  }
+
+  // [APP 同步补丁 2026-10-13] 提交双因素动态码/恢复码完成登录
+  async function handleTwofaSubmit() {
+    if (!twofaCode.trim()) {
+      Alert.alert('提示', '请输入双因素验证码');
+      return;
+    }
+    setLoading(true);
+    try {
+      const resp = await withTimeout(
+        twoFactorLogin(twofaToken, twofaCode.trim()),
+        15000,
+        'TIMEOUT_15S',
+      );
+      if (resp.success && resp.token) {
+        const user = extractUser(resp);
+        if (user) {
+          await setAuth(resp.token, resp.refresh_token ?? '', user);
+          router.replace('/(tabs)/messages');
+          return;
+        }
+      }
+      if (resp.twofa_token) setTwofaToken(resp.twofa_token);
+      setTwofaCode('');
+      Alert.alert('验证失败', resp.message ?? '双因素验证码不正确');
+    } catch (e) {
+      Alert.alert('验证失败', (e as Error).message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -304,10 +357,73 @@ export default function LoginScreen() {
     }
   }
 
+  // [APP 同步补丁 2026-10-13] 发送手机短信验证码（需先过极验）
+  async function handleSendPhoneCode() {
+    if (!phone.trim() || phone.trim().length !== 11) {
+      Alert.alert('提示', '请输入 11 位手机号');
+      return;
+    }
+    if (phoneCountdown.running) return;
+    if (captchaEnabled && !geetestResult) {
+      setCaptchaVisible(true);
+      Alert.alert('提示', '请先完成滑块验证，再获取短信验证码');
+      return;
+    }
+    setSendingPhoneCode(true);
+    try {
+      const resp = await sendSmsCode(phone.trim(), 'login', geetestResult?.challenge ?? '');
+      if (resp.success) {
+        phoneCountdown.start();
+        Alert.alert('已发送', '验证码已发送至手机');
+      } else {
+        Alert.alert('发送失败', resp.message || '请稍后重试');
+      }
+    } catch (e) {
+      Alert.alert('发送失败', (e as Error).message);
+    } finally {
+      setSendingPhoneCode(false);
+    }
+  }
+
+  // [APP 同步补丁 2026-10-13] 手机号登录（验证码或密码）
+  async function handlePhoneLogin() {
+    if (!phone.trim() || phone.trim().length !== 11) {
+      Alert.alert('提示', '请输入 11 位手机号');
+      return;
+    }
+    if (!phoneCode.trim() && !phonePassword.trim()) {
+      Alert.alert('提示', '请输入短信验证码或密码');
+      return;
+    }
+    setLoading(true);
+    try {
+      const resp = await withTimeout(
+        loginByPhone(
+          phoneCode.trim()
+            ? { phone: phone.trim(), code: phoneCode.trim() }
+            : { phone: phone.trim(), password: phonePassword },
+        ),
+        15000,
+        'TIMEOUT_15S',
+      );
+      await applyLoginResponse(resp);
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (isTimeoutError(e)) {
+        Alert.alert('登录超时', '连接服务器超时（15秒）。\n\n建议：返回服务器配置页改用 IP 地址连接');
+      } else {
+        Alert.alert('登录失败', msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'account', label: '账号登录' },
     { key: 'email', label: '邮箱登录' },
     { key: 'code', label: '验证码登录' },
+    { key: 'phone', label: '手机号' },
   ];
 
   return (
@@ -325,6 +441,36 @@ export default function LoginScreen() {
             {serverUrl ?? '未配置服务器'}
           </Text>
 
+          {need2fa ? (
+            <>
+              <Card style={styles.form}>
+                <Text style={[styles.label, { color: c.textSecondary }]}>双因素验证</Text>
+                <Text style={[styles.hint, { color: c.textSecondary }]}>
+                  请输入身份验证器 App（如 Google Authenticator）中的 6 位动态验证码，也可使用一次性恢复码。
+                </Text>
+                <Input
+                  value={twofaCode}
+                  onChangeText={(t) => setTwofaCode(t.toUpperCase())}
+                  placeholder="6 位动态码或 XXXX-XXXX 恢复码"
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  style={styles.input}
+                />
+              </Card>
+              <Button label="验证并登录" onPress={handleTwofaSubmit} loading={loading} />
+              <Pressable
+                onPress={() => {
+                  setNeed2fa(false);
+                  setTwofaCode('');
+                  setTwofaToken('');
+                }}
+                style={{ alignSelf: 'center' }}
+              >
+                <Text style={[styles.link, { color: c.primary }]}>返回重新登录</Text>
+              </Pressable>
+            </>
+          ) : (
+          <>
           <View style={styles.tabBar}>
             {tabs.map((t) => {
               const active = t.key === tab;
@@ -469,6 +615,59 @@ export default function LoginScreen() {
             </Card>
           )}
 
+          {tab === 'phone' && (
+            <Card style={styles.form}>
+              <Text style={[styles.label, { color: c.textSecondary }]}>手机号</Text>
+              <Input
+                value={phone}
+                onChangeText={(t) => setPhone(t.replace(/\D/g, '').slice(0, 11))}
+                placeholder="11 位手机号"
+                keyboardType="number-pad"
+                autoCapitalize="none"
+                style={styles.input}
+              />
+              <Text
+                style={[styles.label, { color: c.textSecondary, marginTop: spacing.md }]}
+              >
+                密码（密码登录）
+              </Text>
+              <View style={styles.passwordRow}>
+                <Input
+                  value={phonePassword}
+                  onChangeText={setPhonePassword}
+                  placeholder="••••••••"
+                  secureTextEntry
+                  style={styles.passwordInput}
+                />
+              </View>
+              <Text
+                style={[styles.label, { color: c.textSecondary, marginTop: spacing.md }]}
+              >
+                短信验证码（验证码登录）
+              </Text>
+              <View style={styles.codeRow}>
+                <Input
+                  value={phoneCode}
+                  onChangeText={(t) => setPhoneCode(t.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="6 位验证码"
+                  keyboardType="number-pad"
+                  style={styles.codeInput}
+                />
+                <Button
+                  label={phoneCountdown.running ? `${phoneCountdown.countdown}s` : '获取验证码'}
+                  onPress={handleSendPhoneCode}
+                  loading={sendingPhoneCode}
+                  disabled={phoneCountdown.running || sendingPhoneCode}
+                  variant="secondary"
+                  style={styles.codeBtn}
+                />
+              </View>
+              <Text style={[styles.hint, { color: c.textMuted, marginTop: spacing.sm }]}>
+                密码与验证码填其一即可；获取验证码前需先完成滑块验证。
+              </Text>
+            </Card>
+          )}
+
           {tab === 'account' && captchaEnabled && (
             <Button
               label={geetestResult ? '✓ 已完成滑块验证' : '完成滑块验证'}
@@ -501,6 +700,17 @@ export default function LoginScreen() {
           {tab === 'code' && (
             <Button label="登录" onPress={handleCodeLogin} loading={loading} />
           )}
+          {tab === 'phone' && captchaEnabled && (
+            <Button
+              label={geetestResult ? '✓ 已完成滑块验证' : '完成滑块验证'}
+              onPress={() => setCaptchaVisible(true)}
+              variant={geetestResult ? 'secondary' : 'primary'}
+              disabled={!!geetestResult}
+            />
+          )}
+          {tab === 'phone' && (
+            <Button label="登录" onPress={handlePhoneLogin} loading={loading} />
+          )}
 
           <View style={styles.links}>
             <Pressable onPress={() => router.push('/(onboarding)/forgot-password')}>
@@ -512,6 +722,8 @@ export default function LoginScreen() {
               </Pressable>
             )}
           </View>
+          </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
       <GeetestCaptcha
@@ -570,4 +782,5 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   link: { ...typography.body, fontWeight: '500' },
+  hint: { ...typography.caption, lineHeight: 18 },
 });
