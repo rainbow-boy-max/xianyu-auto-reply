@@ -59,6 +59,10 @@ export default function MineStackLayout() {
       <Stack.Screen name="ai-listing-configs" options={{ title: 'AI 配置' }} />
       <Stack.Screen name="scheduled-tasks" options={{ title: '定时任务' }} />
       <Stack.Screen name="data-management" options={{ title: '数据管理' }} />
+      {/* [APP 补齐 2026-10-14] 会员订阅 / AI 钱包 / 兑换中心 */}
+      <Stack.Screen name="subscription" options={{ title: '会员中心' }} />
+      <Stack.Screen name="ai-wallet" options={{ title: 'AI 钱包' }} />
+      <Stack.Screen name="redeem" options={{ title: '兑换中心' }} />
       <Stack.Screen name="items" options={{ title: '商品管理' }} />
     </Stack>
   );

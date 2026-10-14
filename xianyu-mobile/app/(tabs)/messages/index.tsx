@@ -52,7 +52,8 @@ export default function MessagesScreen() {
       const list = await getChatAccounts();
       setAccounts(list);
       setSelectedAccount((prev) => {
-        if (prev) return prev; // 已有选中账号，不覆盖
+        // [消息切账号修复 2026-10-14] 已选账号若已失效/被删除，自动回退到第一个可用账号
+        if (prev && list.some((a) => a.account_id === prev.account_id)) return prev;
         return list.length > 0 ? list[0] : null;
       });
     } catch (e) {
@@ -180,19 +181,31 @@ export default function MessagesScreen() {
     }
   }, [selectedAccount, loadConversations]);
 
-  async function handleSelectAccount(acc: ChatAccount) {
-    if (!acc.connected) {
-      try {
-        await connectAccount(acc.account_id);
-      } catch (e) {
-        console.error('连接失败', e);
-        return;
-      }
+  async function handleSelectAccount(acc: ChatAccount, force = false) {
+    const same = selectedAccount?.account_id === acc.account_id;
+    if (same && !force) return;
+    if (same) {
+      // 同一账号强制重连：直接重建 WS（setSelectedAccount 传同一引用不会触发副作用）
+      wsManager.disconnect(acc.account_id);
+      wsManager.connect(acc.account_id);
+      return;
+    }
+    // [消息切账号修复 2026-10-14] 强制重连，不再依赖 connected 标志（服务重启后可自愈）
+    try {
+      await connectAccount(acc.account_id);
+    } catch (e) {
+      console.error('连接失败', e);
     }
     // 先断开旧账号 WS
     if (selectedAccount) {
       wsManager.disconnect(selectedAccount.account_id);
     }
+    // 清空上一账号的会话与分页状态，避免串号/空态残留
+    convSeqRef.current += 1;
+    cursorRef.current = null;
+    hasMoreRef.current = true;
+    setConversations([]);
+    setLoading(true);
     setSelectedAccount(acc);
   }
 
@@ -357,6 +370,11 @@ export default function MessagesScreen() {
             <Text style={[styles.wsText, { color: c.textSecondary }]}>
               {wsConnected ? '实时连接中' : '离线（消息需手动刷新）'}
             </Text>
+            {!wsConnected && (
+              <Pressable onPress={() => handleSelectAccount(selectedAccount, true)} hitSlop={8} style={{ marginLeft: 8 }}>
+                <Text style={{ color: c.primary, fontSize: typography.xs }}>重新连接</Text>
+              </Pressable>
+            )}
           </View>
         )}
         </>

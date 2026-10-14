@@ -144,6 +144,7 @@ export default function MineScreen() {
       items: [
         { label: '会员中心', icon: Crown, onPress: () => router.push('/(tabs)/mine/subscription') },
         { label: 'AI 钱包', icon: Coins, onPress: () => router.push('/(tabs)/mine/ai-wallet') },
+        { label: '兑换中心', icon: Ticket, onPress: () => router.push('/(tabs)/mine/redeem') },
       ],
     },
     {

@@ -195,11 +195,46 @@ export async function transferToAiWallet(amount: string, payPassword: string) {
   }
 }
 
-export async function setPayPassword(newPassword: string, oldPassword = ''): Promise<boolean> {
+export async function setPayPassword(
+  newPassword: string,
+  oldPassword = '',
+  verifyCode = '',
+  channel = '',
+): Promise<boolean> {
   try {
     const client = await getApiClient();
     await (client.POST as any)('/api/v1/wallet/pay-password/set', {
-      body: { new_password: newPassword, old_password: oldPassword },
+      body: { new_password: newPassword, old_password: oldPassword, verify_code: verifyCode, channel },
+    });
+    return true;
+  } catch (e) {
+    throw await extractError(e);
+  }
+}
+
+/** 发送支付密码验证码（channel: sms/email）— [支付密码验证码 2026-10-14] */
+export async function sendPayPasswordCode(channel: 'sms' | 'email'): Promise<boolean> {
+  try {
+    const client = await getApiClient();
+    await (client.POST as any)('/api/v1/wallet/pay-password/send-code', {
+      body: { channel },
+    });
+    return true;
+  } catch (e) {
+    throw await extractError(e);
+  }
+}
+
+/** 忘记支付密码：验证码重置 */
+export async function resetPayPassword(
+  newPassword: string,
+  verifyCode: string,
+  channel: 'sms' | 'email',
+): Promise<boolean> {
+  try {
+    const client = await getApiClient();
+    await (client.POST as any)('/api/v1/wallet/pay-password/reset', {
+      body: { new_password: newPassword, verify_code: verifyCode, channel },
     });
     return true;
   } catch (e) {

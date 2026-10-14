@@ -64,7 +64,7 @@ interface SettingDef {
 
 type SettingCategory =
   | '基础设置'
-  | 'SMTP配置'
+  | 'SMTP邮件配置'
   | 'Token获取方式'
   | '密码登录远程配置'
   | '提现配置';
@@ -77,9 +77,9 @@ type SettingCategory =
  *    这里用「Web端/远程」标签映射（browser=Web端、protocol=远程）。
  */
 const SETTING_DEFS: SettingDef[] = [
-  // 基础设置
-  { key: 'registration_enabled', label: '允许注册', type: 'switch', category: '基础设置' },
-  { key: 'login_captcha_enabled', label: '登录验证码', type: 'switch', category: '基础设置' },
+  // 基础设置（键名与文案与网页后台保持完全一致，[设置一致性整改 2026-10-14]）
+  { key: 'registration_enabled', label: '允许用户注册', type: 'switch', category: '基础设置' },
+  { key: 'login_captcha_enabled', label: '登录滑动验证码', type: 'switch', category: '基础设置' },
   { key: 'show_default_login_info', label: '显示默认登录信息', type: 'switch', category: '基础设置' },
   { key: 'log.retention_days', label: '日志保留天数', type: 'input', category: '基础设置', numeric: true, placeholder: '如 30' },
   { key: 'account.face_verify_timeout_disable', label: '人脸验证超时自动禁用', type: 'switch', category: '基础设置' },
@@ -94,12 +94,12 @@ const SETTING_DEFS: SettingDef[] = [
       { value: 'protocol', label: '远程' },
     ],
   },
-  // SMTP 配置
-  { key: 'smtp_server', label: '服务器', type: 'input', category: 'SMTP配置', placeholder: '如 smtp.qq.com' },
-  { key: 'smtp_port', label: '端口', type: 'input', category: 'SMTP配置', numeric: true, placeholder: '如 465' },
-  { key: 'smtp_username', label: '发件邮箱', type: 'input', category: 'SMTP配置', placeholder: '发件邮箱地址' },
-  { key: 'smtp_password', label: '密码', type: 'secret', category: 'SMTP配置', placeholder: '邮箱密码/授权码' },
-  { key: 'smtp_sender', label: '发件人', type: 'input', category: 'SMTP配置', placeholder: '发件人名称' },
+  // SMTP 配置（键名与后端 email_service 读取的 smtp_* 一致：[设置一致性整改 2026-10-14]）
+  { key: 'smtp_server', label: 'SMTP服务器', type: 'input', category: 'SMTP邮件配置', placeholder: '如 smtp.qq.com' },
+  { key: 'smtp_port', label: 'SMTP端口', type: 'input', category: 'SMTP邮件配置', numeric: true, placeholder: '如 465' },
+  { key: 'smtp_user', label: '发件邮箱', type: 'input', category: 'SMTP邮件配置', placeholder: '发件邮箱地址' },
+  { key: 'smtp_password', label: '邮箱密码/授权码', type: 'secret', category: 'SMTP邮件配置', placeholder: '邮箱密码/授权码' },
+  { key: 'smtp_from', label: '发件人显示名（可选）', type: 'input', category: 'SMTP邮件配置', placeholder: '发件人名称' },
   // Token 获取方式
   {
     key: 'token.api_mode',
@@ -124,7 +124,7 @@ const SETTING_DEFS: SettingDef[] = [
 
 const CATEGORIES: { name: SettingCategory; icon: typeof Shield }[] = [
   { name: '基础设置', icon: Shield },
-  { name: 'SMTP配置', icon: Mail },
+  { name: 'SMTP邮件配置', icon: Mail },
   { name: 'Token获取方式', icon: Globe },
   { name: '密码登录远程配置', icon: Globe },
   { name: '提现配置', icon: Wallet },
@@ -704,7 +704,7 @@ export default function SettingsScreen() {
                       })}
 
                       {/* 类别专属操作区 */}
-                      {cat.name === 'SMTP配置' && (
+                      {cat.name === 'SMTP邮件配置' && (
                         <Button
                           label="发送测试邮件"
                           onPress={() => setShowTestEmail(true)}
