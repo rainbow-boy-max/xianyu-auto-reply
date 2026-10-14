@@ -180,3 +180,115 @@ export async function deleteMessageNotification(id: number): Promise<void> {
   const client = await getApiClient();
   await (client.DELETE as any)(`/api/v1/message-notifications/${id}`);
 }
+
+// ---------------------------------------------------------------------------
+// [通知体系重构 2026-10-15] 事件 × 渠道订阅矩阵
+// 后端路由前缀: /api/v1/notifications
+// ---------------------------------------------------------------------------
+
+export interface NotifyEventDef {
+  key: string;
+  label: string;
+  desc: string;
+  scope: string;
+}
+
+export interface NotifyChannelOption {
+  key: string;
+  label: string;
+  type: string;
+}
+
+export interface NotifyChannelField {
+  name: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  placeholder?: string;
+  help?: string;
+}
+
+export interface NotifyPrefs {
+  sms_phone?: string;
+  email?: string;
+  account_phone?: string;
+  account_email?: string;
+}
+
+export interface NotifyRegistry {
+  events: NotifyEventDef[];
+  channels: (NotifyChannelOption & { desc: string; kind: string })[];
+  channel_fields: Record<string, NotifyChannelField[]>;
+}
+
+export interface NotifyMatrixData {
+  events: NotifyEventDef[];
+  builtin_channels: NotifyChannelOption[];
+  configured_channels: NotifyChannelOption[];
+  matrix: Record<string, string[]>;
+  prefs: NotifyPrefs;
+  registry?: NotifyRegistry;
+}
+
+/** 读取事件/渠道注册表 + 我的订阅矩阵 + 偏好 */
+export async function getNotifyMatrix(): Promise<NotifyMatrixData | null> {
+  const client = await getApiClient();
+  const { data } = (await (client.GET as any)('/api/v1/notifications/events')) as {
+    data?: unknown;
+    error?: unknown;
+  };
+  const body = unwrap<NotifyMatrixData>(data);
+  return body ?? null;
+}
+
+/** 设置某事件某渠道的订阅开关 */
+export async function setNotifySubscription(
+  eventKey: string,
+  channelKey: string,
+  enabled: boolean,
+): Promise<{ success: boolean; message?: string }> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.PUT as any)('/api/v1/notifications/subscriptions', {
+    body: { event_key: eventKey, channel_key: channelKey, enabled },
+  })) as { data?: unknown; error?: unknown };
+  if (error) throw await extractError(error);
+  const body = (data ?? {}) as Record<string, unknown>;
+  return { success: body.success !== false, message: body.message as string | undefined };
+}
+
+/** 读取通知接收偏好（短信手机号 / 邮件收件地址） */
+export async function getNotifyPrefs(): Promise<NotifyPrefs | null> {
+  const client = await getApiClient();
+  const { data } = (await (client.GET as any)('/api/v1/notifications/prefs')) as {
+    data?: unknown;
+    error?: unknown;
+  };
+  return unwrap<NotifyPrefs>(data) ?? null;
+}
+
+/** 保存通知接收偏好 */
+export async function putNotifyPrefs(
+  smsPhone: string,
+  email: string,
+): Promise<{ success: boolean; message?: string }> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.PUT as any)('/api/v1/notifications/prefs', {
+    body: { sms_phone: smsPhone, email },
+  })) as { data?: unknown; error?: unknown };
+  if (error) throw await extractError(error);
+  const body = (data ?? {}) as Record<string, unknown>;
+  return { success: body.success !== false, message: body.message as string | undefined };
+}
+
+/** 按当前订阅发送一条测试通知，返回实际结果 */
+export async function testNotifyEvent(
+  eventKey: string,
+): Promise<{ success: boolean; message?: string }> {
+  const client = await getApiClient();
+  const { data, error } = (await (client.POST as any)('/api/v1/notifications/events/test', {
+    body: { event_key: eventKey },
+  })) as { data?: unknown; error?: unknown };
+  if (error) throw await extractError(error);
+  const body = (data ?? {}) as Record<string, unknown>;
+  return { success: body.success !== false, message: body.message as string | undefined };
+}

@@ -1,215 +1,237 @@
+/**
+ * 消息通知（[通知体系重构 2026-10-15]）
+ *
+ * 与网页端一致：改为「事件 × 渠道」订阅矩阵。
+ * - 系统预设通知事件，用户为每个事件勾选想用的渠道
+ * - 顶部可设置短信接收手机号与邮件收件地址（邮件由系统统一发出）
+ * - 每个事件可「测试」一次，返回实际发送结果
+ */
 import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
-  Pressable,
-  Switch,
-  Alert,
-  Modal,
-  RefreshControl,
   ScrollView,
+  Pressable,
+  RefreshControl,
+  Alert,
+  ActivityIndicator,
   useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Card, Button, Loading } from '@/components/ui';
+import { Card, Button, Input, Loading, EmptyState } from '@/components/ui';
 import { colors, spacing, typography, radius } from '@/lib/theme';
 import {
-  getNotificationChannels,
-  getMessageNotifications,
-  createMessageNotification,
-  updateMessageNotification,
-  deleteMessageNotification,
-  type MessageNotificationBinding,
+  getNotifyMatrix,
+  setNotifySubscription,
+  putNotifyPrefs,
+  testNotifyEvent,
+  type NotifyMatrixData,
+  type NotifyChannelOption,
+  type NotifyPrefs,
 } from '@/api/wrappers/notifications';
-import type { AccountOption } from '@/api/wrappers/accounts';
-import { useAccountsStore } from '@/stores/accounts';
-
-function accountLabel(a: AccountOption): string {
-  return a.remark ? `${a.remark} (${a.id})` : a.id;
-}
 
 export default function MessageNotificationsScreen() {
   const scheme = useColorScheme();
   const c = colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  const [bindings, setBindings] = useState<MessageNotificationBinding[]>([]);
-  const [channels, setChannels] = useState<{ id: number; name: string }[]>([]);
-  const accounts = useAccountsStore((s) => s.options);
-  const loadAccountOptions = useAccountsStore((s) => s.load);
+  const [data, setData] = useState<NotifyMatrixData | null>(null);
+  const [matrix, setMatrix] = useState<Record<string, string[]>>({});
+  const [prefs, setPrefs] = useState<NotifyPrefs>({ sms_phone: '', email: '' });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [addVisible, setAddVisible] = useState(false);
-  const [newAccountId, setNewAccountId] = useState('');
-  const [newChannelId, setNewChannelId] = useState<number | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  const [testingKey, setTestingKey] = useState('');
 
-  // force=true 用于下拉刷新绕过 60s TTL；账号请求与绑定/渠道请求并行
   const loadAll = useCallback(async (force = false) => {
     try {
-      setRefreshing(true);
-      const accTask = loadAccountOptions(force);
-      const [b, ch] = await Promise.all([getMessageNotifications(), getNotificationChannels()]);
-      await accTask;
-      setBindings(b);
-      setChannels(ch.map((item) => ({ id: item.id, name: item.name })));
-    } catch (e) { Alert.alert('加载失败', (e as Error).message); }
-    finally { setLoading(false); setRefreshing(false); }
-  }, [loadAccountOptions]);
+      if (force) setRefreshing(true);
+      const res = await getNotifyMatrix();
+      if (res) {
+        setData(res);
+        setMatrix(res.matrix || {});
+        setPrefs({
+          sms_phone: res.prefs?.sms_phone || '',
+          email: res.prefs?.email || '',
+          account_phone: res.prefs?.account_phone || '',
+          account_email: res.prefs?.account_email || '',
+        });
+      }
+    } catch (e) {
+      Alert.alert('加载失败', (e as Error).message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  function channelName(channelId: number): string {
-    const found = channels.find((ch) => ch.id === channelId);
-    return found?.name ?? `渠道 #${channelId}`;
-  }
+  const options: NotifyChannelOption[] = [
+    ...(data?.builtin_channels || []),
+    ...(data?.configured_channels || []),
+  ];
 
-  async function handleToggle(item: MessageNotificationBinding) {
-    const next = !item.enabled;
-    setBindings((prev) => prev.map((b) => (b.id === item.id ? { ...b, enabled: next } : b)));
-    try { await updateMessageNotification(item.id, next); }
-    catch (e) {
-      setBindings((prev) => prev.map((b) => (b.id === item.id ? { ...b, enabled: !next } : b)));
-      Alert.alert('操作失败', (e as Error).message);
+  async function toggle(eventKey: string, channelKey: string, checked: boolean) {
+    const prev = matrix[eventKey] || [];
+    const next = checked ? [...prev, channelKey] : prev.filter((k) => k !== channelKey);
+    setMatrix((m) => ({ ...m, [eventKey]: next }));
+    try {
+      const res = await setNotifySubscription(eventKey, channelKey, checked);
+      if (res.success === false) {
+        Alert.alert('保存失败', res.message || '请稍后重试');
+        setMatrix((m) => ({ ...m, [eventKey]: prev }));
+      }
+    } catch (e) {
+      setMatrix((m) => ({ ...m, [eventKey]: prev }));
+      Alert.alert('保存失败', (e as Error).message);
     }
   }
 
-  function handleDelete(item: MessageNotificationBinding) {
-    Alert.alert('确认删除', `删除账号 ${item.account_id} 的通知绑定？`, [
-      { text: '取消' },
-      { text: '删除', style: 'destructive', onPress: async () => {
-        try { await deleteMessageNotification(item.id); await loadAll(); }
-        catch (e) { Alert.alert('删除失败', (e as Error).message); }
-      } },
-    ]);
-  }
-
-  function openAdd() {
-    if (!newAccountId && accounts.length > 0) setNewAccountId(accounts[0].id);
-    if (newChannelId == null && channels.length > 0) setNewChannelId(channels[0].id);
-    setAddVisible(true);
-  }
-
-  async function handleCreate() {
-    if (!newAccountId) { Alert.alert('提示', '请选择账号'); return; }
-    if (newChannelId == null) { Alert.alert('提示', '请选择通知渠道'); return; }
-    setCreating(true);
+  async function savePrefs() {
+    setSavingPrefs(true);
     try {
-      await createMessageNotification(newAccountId, newChannelId);
-      setNewAccountId(''); setNewChannelId(null);
-      setAddVisible(false);
-      await loadAll();
-    } catch (e) { Alert.alert('创建失败', (e as Error).message); }
-    finally { setCreating(false); }
+      const res = await putNotifyPrefs(prefs.sms_phone || '', prefs.email || '');
+      Alert.alert(res.success === false ? '保存失败' : '已保存', res.message || '通知接收方式已更新');
+    } catch (e) {
+      Alert.alert('保存失败', (e as Error).message);
+    } finally {
+      setSavingPrefs(false);
+    }
+  }
+
+  async function handleTest(eventKey: string) {
+    setTestingKey(eventKey);
+    try {
+      const res = await testNotifyEvent(eventKey);
+      Alert.alert(res.success ? '测试已发送' : '测试未发送成功', res.message || '');
+    } catch (e) {
+      Alert.alert('测试失败', (e as Error).message);
+    } finally {
+      setTestingKey('');
+    }
   }
 
   if (loading) {
-    return (<SafeAreaView style={[styles.container, { backgroundColor: c.background }]}><Loading label="加载通知绑定..." /></SafeAreaView>);
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: c.background }]}>
+        <Loading label="加载通知订阅..." />
+      </SafeAreaView>
+    );
   }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: c.background }]} edges={['left', 'right', 'bottom']}>
-      <View style={styles.header}>
-        <Button label="新建绑定" variant="secondary" onPress={openAdd} />
-      </View>
-
-      <FlatList
-        data={bindings} keyExtractor={(item) => String(item.id)}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadAll(true)} />}
-        renderItem={({ item }) => (
-          <Card style={styles.card}>
-            <View style={styles.cardRow}>
-              <View style={styles.cardContent}>
-                <Text style={[styles.accountId, { color: c.text }]} numberOfLines={1}>{item.account_id}</Text>
-                <View style={styles.channelRow}>
-                  <View style={[styles.channelBadge, { backgroundColor: c.primaryLight }]}>
-                    <Text style={[styles.channelBadgeText, { color: c.primary }]} numberOfLines={1}>{item.channel_name || channelName(item.channel_id)}</Text>
-                  </View>
-                </View>
-              </View>
-              <View style={styles.cardActions}>
-                <Switch
-                  value={item.enabled}
-                  onValueChange={() => handleToggle(item)}
-                  trackColor={{ false: c.border, true: c.primary }}
-                />
-                <Button label="删除" variant="danger" onPress={() => handleDelete(item)} style={styles.btn} />
-              </View>
-            </View>
-          </Card>
-        )}
-        ListEmptyComponent={<View style={styles.empty}><Text style={[styles.emptyText, { color: c.textMuted }]}>暂无通知绑定</Text></View>}
+      <ScrollView
         contentContainerStyle={styles.list}
-      />
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadAll(true)} />}
+      >
+        <Text style={[styles.hint, { color: c.textSecondary }]}>
+          为每个通知事件勾选想使用的渠道。通知内容由系统预设，无需自行编写；
+          渠道需先到「通知渠道」配置，短信需先绑定手机号。
+        </Text>
 
-      <Modal visible={addVisible} transparent animationType="slide" onRequestClose={() => setAddVisible(false)}>
-        <Pressable style={styles.sheetOverlay} onPress={() => setAddVisible(false)}>
-          <Pressable style={[styles.sheet, { backgroundColor: c.surface }]} onPress={() => {}}>
-            <View style={[styles.sheetHandle, { backgroundColor: c.border }]} />
-            <Text style={[styles.sheetTitle, { color: c.text }]}>新建绑定</Text>
-            <Text style={[styles.label, { color: c.textSecondary }]}>账号</Text>
-            {accounts.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionSelector} contentContainerStyle={styles.optionSelectorContent}>
-                {accounts.map((a) => (
-                  <Pressable key={a.id} onPress={() => setNewAccountId(a.id)}
-                    style={[styles.optionChip, { backgroundColor: newAccountId === a.id ? c.primary : c.background, borderColor: newAccountId === a.id ? c.primary : c.border }]}>
-                    <Text style={[styles.optionChipText, { color: newAccountId === a.id ? '#FFF' : c.text }]} numberOfLines={1}>{accountLabel(a)}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            ) : (
-              <Text style={[styles.emptyOptions, { color: c.textMuted }]}>暂无可用账号</Text>
-            )}
-            <Text style={[styles.label, { color: c.textSecondary, marginTop: spacing.sm }]}>通知渠道</Text>
-            {channels.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionSelector} contentContainerStyle={styles.optionSelectorContent}>
-                {channels.map((ch) => (
-                  <Pressable key={ch.id} onPress={() => setNewChannelId(ch.id)}
-                    style={[styles.optionChip, { backgroundColor: newChannelId === ch.id ? c.primary : c.background, borderColor: newChannelId === ch.id ? c.primary : c.border }]}>
-                    <Text style={[styles.optionChipText, { color: newChannelId === ch.id ? '#FFF' : c.text }]} numberOfLines={1}>{ch.name}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            ) : (
-              <Text style={[styles.emptyOptions, { color: c.textMuted }]}>暂无通知渠道，请先创建渠道</Text>
-            )}
-            <View style={styles.sheetActions}>
-              <Button label="取消" variant="secondary" onPress={() => setAddVisible(false)} style={styles.sheetBtn} />
-              <Button label="创建" onPress={handleCreate} loading={creating} disabled={accounts.length === 0 || channels.length === 0} style={styles.sheetBtn} />
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        {/* 通知接收方式 */}
+        <Card style={styles.card}>
+          <Text style={[styles.sectionTitle, { color: c.text }]}>我的通知接收方式</Text>
+          <Text style={[styles.label, { color: c.textSecondary }]}>短信接收手机号</Text>
+          <Input
+            value={prefs.sms_phone || ''}
+            onChangeText={(t) => setPrefs((p) => ({ ...p, sms_phone: t }))}
+            placeholder={prefs.account_phone ? `留空则用账号手机号 ${prefs.account_phone}` : '尚未绑定手机号'}
+            keyboardType="phone-pad"
+          />
+          <Text style={[styles.label, { color: c.textSecondary, marginTop: spacing.sm }]}>邮件接收地址</Text>
+          <Input
+            value={prefs.email || ''}
+            onChangeText={(t) => setPrefs((p) => ({ ...p, email: t }))}
+            placeholder={prefs.account_email ? `留空则用账号邮箱 ${prefs.account_email}` : '接收通知的邮箱'}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          <Text style={[styles.tinyHint, { color: c.textMuted }]}>邮件由系统统一发送，无需填写邮箱服务器。</Text>
+          <Button
+            label="保存接收方式"
+            onPress={savePrefs}
+            loading={savingPrefs}
+            style={{ marginTop: spacing.sm }}
+          />
+        </Card>
+
+        {options.length === 0 ? (
+          <EmptyState title="暂无可选渠道" message="请先到「通知渠道」页配置渠道" />
+        ) : (
+          (data?.events || []).map((ev) => {
+            const checked = matrix[ev.key] || [];
+            return (
+              <Card key={ev.key} style={styles.card}>
+                <View style={styles.eventHead}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.eventLabel, { color: c.text }]}>{ev.label}</Text>
+                    <Text style={[styles.eventDesc, { color: c.textMuted }]}>{ev.desc}</Text>
+                  </View>
+                  <Button
+                    label={testingKey === ev.key ? '发送中' : '测试'}
+                    variant="secondary"
+                    onPress={() => handleTest(ev.key)}
+                    disabled={testingKey === ev.key}
+                  />
+                </View>
+                <View style={styles.chips}>
+                  {options.map((o) => {
+                    const on = checked.includes(o.key);
+                    return (
+                      <Pressable
+                        key={o.key}
+                        onPress={() => toggle(ev.key, o.key, !on)}
+                        style={[
+                          styles.chip,
+                          {
+                            backgroundColor: on ? c.primary : c.background,
+                            borderColor: on ? c.primary : c.border,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.chipText, { color: on ? '#FFF' : c.text }]}>
+                          {on ? '✓ ' : ''}{o.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </Card>
+            );
+          })
+        )}
+
+        {testingKey !== '' && (
+          <View style={styles.testing}>
+            <ActivityIndicator color={c.primary} />
+          </View>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  list: { padding: spacing.lg, paddingTop: 0, gap: spacing.md },
+  list: { padding: spacing.lg, gap: spacing.md },
+  hint: { ...typography.caption, lineHeight: 18 },
   card: { gap: spacing.xs },
-  cardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardContent: { flex: 1, marginRight: spacing.md, gap: spacing.xs },
-  cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  accountId: { ...typography.body },
-  channelRow: { flexDirection: 'row', alignItems: 'center' },
-  channelBadge: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start', maxWidth: '100%' },
-  channelBadgeText: { fontSize: 11, fontWeight: '600' },
-  btn: { minHeight: 36 },
-  empty: { alignItems: 'center', paddingVertical: 28 },
-  emptyText: { ...typography.body },
-  sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: { borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: spacing.lg, gap: spacing.xs },
-  sheetHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: spacing.sm },
-  sheetTitle: { ...typography.heading, textAlign: 'center', marginBottom: spacing.sm },
-  label: { ...typography.caption },
-  optionSelector: { flexGrow: 0 },
-  optionSelectorContent: { gap: spacing.sm, paddingVertical: spacing.xs },
-  optionChip: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.sm, borderWidth: 1, maxWidth: 220 },
-  optionChipText: { ...typography.caption },
-  emptyOptions: { ...typography.caption, paddingVertical: spacing.sm },
-  sheetActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  sheetBtn: { flex: 1 },
+  sectionTitle: { ...typography.heading, marginBottom: spacing.xs },
+  label: { ...typography.caption, marginBottom: 4 },
+  tinyHint: { ...typography.caption, marginTop: 4 },
+  eventHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  eventLabel: { ...typography.body, fontWeight: '600' },
+  eventDesc: { ...typography.caption, marginTop: 2 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  chipText: { ...typography.caption, fontWeight: '600' },
+  testing: { alignItems: 'center', paddingVertical: spacing.md },
 });

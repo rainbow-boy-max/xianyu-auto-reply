@@ -108,7 +108,7 @@ export default function MineScreen() {
       title: '通知',
       items: [
         { label: '通知渠道', icon: Bell, onPress: () => router.push('/(tabs)/mine/notification-channels') },
-        { label: '消息通知绑定', icon: Send, onPress: () => router.push('/(tabs)/mine/message-notifications') },
+        { label: '消息通知', icon: Send, onPress: () => router.push('/(tabs)/mine/message-notifications') },
         { label: '通知管理', icon: BellOff, onPress: () => router.push('/(tabs)/mine/notifications') },
       ],
     },

@@ -53,7 +53,7 @@ export default function MineStackLayout() {
       <Stack.Screen name="blacklist" options={{ title: '黑名单管理' }} />
       <Stack.Screen name="risk-logs" options={{ title: '风控日志' }} />
       <Stack.Screen name="notification-channels" options={{ title: '通知渠道' }} />
-      <Stack.Screen name="message-notifications" options={{ title: '消息通知绑定' }} />
+      <Stack.Screen name="message-notifications" options={{ title: '消息通知' }} />
       <Stack.Screen name="ai-listing" options={{ title: 'AI 上架' }} />
       <Stack.Screen name="ai-listing-history" options={{ title: '上架历史' }} />
       <Stack.Screen name="ai-listing-configs" options={{ title: 'AI 配置' }} />
