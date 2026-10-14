@@ -6,6 +6,34 @@ const ACTIVE_KEY = 'active_profile_index';
 const TOKEN_KEY = 'auth_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 
+// [APP 登录修复 2026-10-14] 默认服务器地址（HTTPS 域名）
+export const DEFAULT_SERVER_URL = 'https://xy.miaotuntu.com';
+
+/**
+ * 迁移历史服务器地址：早期版本默认填过 IP:8089，但服务端口已收敛（仅本机监听），
+ * 外网必须经 HTTPS 域名访问。此处自动把指向该 IP/8089 的配置改回官方域名。
+ */
+export async function migrateLegacyServerUrl(): Promise<void> {
+  try {
+    const profiles = await getServerProfiles();
+    if (!profiles.length) return;
+    let changed = false;
+    const next = profiles.map((p) => {
+      const u = (p.url || '').trim();
+      if (/:8089(\/|$)/.test(u) || u.includes('155.103.157.160')) {
+        changed = true;
+        return { ...p, url: DEFAULT_SERVER_URL };
+      }
+      return p;
+    });
+    if (changed) {
+      await AsyncStorage.setItem(PROFILES_KEY, JSON.stringify(next));
+    }
+  } catch {
+    // 迁移失败不影响启动
+  }
+}
+
 export interface ServerProfile {
   name: string;
   url: string;

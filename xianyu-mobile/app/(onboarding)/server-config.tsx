@@ -10,6 +10,7 @@ import { colors, spacing, typography, radius } from '@/lib/theme';
 import { isTimeoutError, withTimeout } from '@/lib/timeout';
 import { useConfigStore } from '@/stores/config';
 import { logger, subscribeLogs, exportLogsAsString, type LogEntry } from '@/lib/logger';
+import { DEFAULT_SERVER_URL } from '@/lib/config';
 
 export default function ServerConfigScreen() {
   const scheme = useColorScheme();
@@ -18,7 +19,7 @@ export default function ServerConfigScreen() {
   const showAlert = useAlert();
   const addProfile = useConfigStore((s) => s.addProfile);
   const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
+  const [url, setUrl] = useState(DEFAULT_SERVER_URL);
   const [testing, setTesting] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(false);
@@ -50,8 +51,8 @@ export default function ServerConfigScreen() {
       return;
     }
     let normalizedUrl = url.trim();
-    if (!normalizedUrl.startsWith('http')) {
-      normalizedUrl = `http://${normalizedUrl}`;
+    if (!/^https?:\/\//i.test(normalizedUrl)) {
+      normalizedUrl = `https://${normalizedUrl}`;
     }
     normalizedUrl = normalizedUrl.replace(/\/+$/, '');
 
@@ -78,9 +79,9 @@ export default function ServerConfigScreen() {
       const err = e as Error;
       let msg = err.message || '未知错误';
       if (isTimeoutError(e)) {
-        msg = '连接超时（15秒）。\n\n常见原因：域名解析到了不可达的 IPv6 地址。\n建议：改用 IP 地址连接，如 http://113.205.186.225:18095\n（IP 可在电脑上 ping 域名获得）';
+        msg = '连接超时（15秒）。\n\n常见原因：服务器地址不可达或网络不通。\n建议：使用 HTTPS 域名地址，如 https://xy.miaotuntu.com';
       } else if (msg === 'Network request failed') {
-        msg = '网络请求失败，请检查：\n1. 服务器地址是否正确\n2. 手机网络是否正常\n3. 服务器是否正在运行\n\n若用域名失败，建议改用 IP 地址直连';
+        msg = '网络请求失败，请检查：\n1. 服务器地址是否正确\n2. 手机网络是否正常\n3. 服务器是否正在运行\n\n建议使用 HTTPS 域名地址，如 https://xy.miaotuntu.com（直连 IP 端口可能被服务器防火墙拦截）';
       }
       logger.error('CONFIG', `连接失败: ${msg}`, { rawError: err.message, url: normalizedUrl });
       showAlert({ title: '连接失败', message: msg, copyable: true });
@@ -95,7 +96,7 @@ export default function ServerConfigScreen() {
       return;
     }
     let normalizedUrl = url.trim();
-    if (!normalizedUrl.startsWith('http')) normalizedUrl = `http://${normalizedUrl}`;
+    if (!/^https?:\/\//i.test(normalizedUrl)) normalizedUrl = `https://${normalizedUrl}`;
     normalizedUrl = normalizedUrl.replace(/\/+$/, '');
     logger.info('CONFIG', `跳过测试，直接保存: ${normalizedUrl}`);
     await addProfile({ name: name.trim() || '默认服务器', url: normalizedUrl });
@@ -122,7 +123,7 @@ export default function ServerConfigScreen() {
           <Input
             value={url}
             onChangeText={setUrl}
-            placeholder="http://your-server-ip:8095"
+            placeholder="https://xy.miaotuntu.com"
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"

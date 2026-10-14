@@ -437,9 +437,11 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <Text style={[styles.title, { color: c.text }]}>闲鱼管家</Text>
-          <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-            {serverUrl ?? '未配置服务器'}
-          </Text>
+          <Pressable onPress={() => router.push('/(onboarding)/server-config')}>
+            <Text style={[styles.subtitle, { color: c.textSecondary }]}>
+              {serverUrl ?? '未配置服务器'}（点击修改）
+            </Text>
+          </Pressable>
 
           {need2fa ? (
             <>

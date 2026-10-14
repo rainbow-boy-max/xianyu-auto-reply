@@ -5,6 +5,7 @@ import {
   getActiveProfileIndex,
   setActiveProfileIndex,
   addServerProfile,
+  migrateLegacyServerUrl,
   type ServerProfile,
 } from '@/lib/config';
 
@@ -25,6 +26,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   loading: true,
 
   init: async () => {
+    // [APP 登录修复 2026-10-14] 先迁移历史 IP:8089 地址
+    await migrateLegacyServerUrl();
     const [url, profiles, index] = await Promise.all([
       getServerUrl(),
       getServerProfiles(),
