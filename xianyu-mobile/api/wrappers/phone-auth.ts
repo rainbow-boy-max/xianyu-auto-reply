@@ -23,7 +23,9 @@ export async function getPhoneStatus(): Promise<PhoneStatus> {
     error?: unknown;
   };
   if (error) throw await extractError(error);
-  return (data ?? {}) as PhoneStatus;
+  // 后端返回 { success, code, message, data:{...} }，需取内层 data
+  const body = data as ({ data?: PhoneStatus } & PhoneStatus) | undefined;
+  return ((body && body.data) ? body.data : body) ?? ({} as PhoneStatus);
 }
 
 export interface RealNameResult {

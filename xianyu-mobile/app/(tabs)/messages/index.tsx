@@ -42,6 +42,8 @@ export default function MessagesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+  // [2026-10-16] 会话加载错误（如「账号未连接」），用于提示与重试
+  const [convError, setConvError] = useState('');
   const cursorRef = useRef<number | null>(null);
   const hasMoreRef = useRef(true);
   // 会话请求序号：切账号并发时丢弃过期响应
@@ -73,21 +75,42 @@ export default function MessagesScreen() {
         if (!append) setRefreshing(true);
         else setLoadingMore(true);
 
-        const resp = await getConversations(
-          targetAccountId,
-          append ? cursorRef.current : null,
-        );
-        if (convSeqRef.current !== seq) return; // 已切到别的账号，丢弃本次响应
-
-        if (append) {
-          setConversations((prev) => [...prev, ...resp.conversations]);
-        } else {
-          setConversations(resp.conversations);
+        // [2026-10-16] 账号连接需数秒（取IM Token→建WS→注册），首次加载若报「未连接」自动重试
+        let resp: Awaited<ReturnType<typeof getConversations>> | null = null;
+        let lastErr: unknown = null;
+        const tries = append ? 1 : 4;
+        for (let i = 0; i < tries; i++) {
+          try {
+            resp = await getConversations(targetAccountId, append ? cursorRef.current : null);
+            lastErr = null;
+            break;
+          } catch (e) {
+            lastErr = e;
+            const msg = (e as Error)?.message || '';
+            if (!append && msg.includes('未连接') && i < tries - 1) {
+              await new Promise((r) => setTimeout(r, 1500));
+              continue;
+            }
+            break;
+          }
         }
-        cursorRef.current = resp.nextCursor;
-        hasMoreRef.current = resp.hasMore;
+        if (convSeqRef.current !== seq) return; // 已切到别的账号，丢弃本次响应
+        if (!resp) throw lastErr instanceof Error ? lastErr : new Error('加载会话失败');
+
+        const page = resp;
+        if (append) {
+          setConversations((prev) => [...prev, ...page.conversations]);
+        } else {
+          setConversations(page.conversations);
+        }
+        cursorRef.current = page.nextCursor;
+        hasMoreRef.current = page.hasMore;
+        setConvError('');
       } catch (e) {
-        if (convSeqRef.current === seq) console.error('加载会话失败', e);
+        if (convSeqRef.current === seq) {
+          setConvError((e as Error)?.message || '加载会话失败');
+          console.error('加载会话失败', e);
+        }
       } finally {
         if (convSeqRef.current === seq) {
           setLoading(false);
@@ -368,15 +391,27 @@ export default function MessagesScreen() {
           <View style={[styles.wsBar, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
             <View style={[styles.wsDot, { backgroundColor: wsConnected ? c.success : c.textMuted }]} />
             <Text style={[styles.wsText, { color: c.textSecondary }]}>
-              {wsConnected ? '实时连接中' : '离线（消息需手动刷新）'}
+              {wsConnected ? '实时已连接' : '未连接（消息需手动刷新）'}
             </Text>
             {!wsConnected && (
               <Pressable onPress={() => handleSelectAccount(selectedAccount, true)} hitSlop={8} style={{ marginLeft: 8 }}>
-                <Text style={{ color: c.primary, fontSize: typography.xs }}>重新连接</Text>
+                <Text style={{ color: c.primary, fontSize: 12 }}>重新连接</Text>
               </Pressable>
             )}
           </View>
         )}
+        {selectedAccount && convError ? (
+          <View style={[styles.wsBar, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+            <Text style={[styles.wsText, { color: c.warning, flex: 1 }]} numberOfLines={2}>{convError}</Text>
+            <Pressable
+              onPress={() => { setConvError(''); handleSelectAccount(selectedAccount, true); }}
+              hitSlop={8}
+              style={{ marginLeft: 8 }}
+            >
+              <Text style={{ color: c.primary, fontSize: 12 }}>重连并重试</Text>
+            </Pressable>
+          </View>
+        ) : null}
         </>
       )}
 

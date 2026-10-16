@@ -69,6 +69,10 @@ export function getClient(baseUrl?: string): ReturnType<typeof createClient<path
               401,
             );
           }
+          // [2026-10-16] 业务 403（无权限/账号停用）→ 抛出，避免被当成功
+          if (b.success === false && Number(b.code) === 403) {
+            throw new ApiError(typeof b.message === 'string' ? b.message : '无权限', 403);
+          }
         }
       } catch (e) {
         if (e instanceof ApiError) throw e;
@@ -88,6 +92,18 @@ export async function getApiClient(): Promise<ReturnType<typeof createClient<pat
   const baseUrl = await getServerUrl();
   if (!baseUrl) throw new ApiError('未配置服务器地址', 0);
   return getClient(baseUrl);
+}
+
+/**
+ * 统一解包后端响应：{ success, code, message, data } → data。
+ * [2026-10-16] 部分接口返回裸值（数组/对象），此时原样返回。
+ */
+export function unwrap<T>(body: unknown): T {
+  if (body && typeof body === 'object' && 'success' in (body as object)) {
+    const b = body as { data?: unknown };
+    return (b.data ?? null) as T;
+  }
+  return body as T;
 }
 
 /**

@@ -80,8 +80,10 @@ export async function getConversations(
   if (!data) return { conversations: [], hasMore: false, nextCursor: null };
   // 后端返回 { success, data } 包裹格式，需提取内层 data
   if ('conversations' in data) return data as ConvResponse;
-  const wrapped = (data as { success?: boolean; data?: ConvResponse | null }).data;
-  return wrapped ?? { conversations: [], hasMore: false, nextCursor: null };
+  const env = data as { success?: boolean; message?: string; data?: ConvResponse | null };
+  // [2026-10-16] 业务失败（如 code=40001 账号未连接）→ 抛出，交由页面提示/重试，避免静默空列表
+  if (env.success === false) throw new Error(env.message || '加载会话失败');
+  return env.data ?? { conversations: [], hasMore: false, nextCursor: null };
 }
 
 export async function getMessages(
