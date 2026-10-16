@@ -42,6 +42,7 @@ export default function MineStackLayout() {
       <Stack.Screen name="shared-scan" options={{ title: '共享扫码' }} />
       <Stack.Screen name="settings" options={{ title: '系统设置' }} />
       <Stack.Screen name="personal" options={{ title: '个人设置' }} />
+      <Stack.Screen name="real-name" options={{ title: '实名认证' }} />
       <Stack.Screen name="logs" options={{ title: '日志查看' }} />
       <Stack.Screen name="app-logs" options={{ title: 'APP 日志' }} />
       <Stack.Screen name="admin-users" options={{ title: '用户管理' }} />

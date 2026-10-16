@@ -152,6 +152,7 @@ export default function MineScreen() {
       items: [
         { label: '系统设置', icon: Settings, onPress: () => router.push('/(tabs)/mine/settings'), adminOnly: true },
         { label: '个人设置', icon: UserCog, onPress: () => router.push('/(tabs)/mine/personal') },
+        { label: '实名认证', icon: Shield, onPress: () => router.push('/(tabs)/mine/real-name') },
       ],
     },
     {

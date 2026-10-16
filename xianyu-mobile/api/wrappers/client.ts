@@ -55,6 +55,25 @@ export function getClient(baseUrl?: string): ReturnType<typeof createClient<path
         }
         throw new ApiError(message, response.status);
       }
+      // [2026-10-16 P2] 后端把鉴权/业务异常也包装为 HTTP 200 + code，
+      // 仅靠 response.ok 无法识别；此处补判业务 code=401（令牌失效）→ 登出并抛错。
+      try {
+        const body = await response.clone().json();
+        if (body && typeof body === 'object') {
+          const b = body as Record<string, unknown>;
+          if (b.success === false && Number(b.code) === 401) {
+            logger.warn('HTTP', `业务 401 未授权: ${response.url}`);
+            useAuthStore.getState().logout();
+            throw new ApiError(
+              typeof b.message === 'string' ? b.message : '登录已过期，请重新登录',
+              401,
+            );
+          }
+        }
+      } catch (e) {
+        if (e instanceof ApiError) throw e;
+        // 响应体非 JSON / 解析失败：忽略，保持原行为
+      }
       // 不返回 response：openapi-fetch 的 instanceof Response 检查在 RN 中会失败
     },
   });
