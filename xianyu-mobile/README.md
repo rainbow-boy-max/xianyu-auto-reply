@@ -160,3 +160,5 @@ npm run sync-api
 ## 许可证
 
 继承 [xianyu-auto-reply](../LICENSE) 的 AGPL-3.0 许可证。
+
+<!-- build trigger 1.0.16 -->
